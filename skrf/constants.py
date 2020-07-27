@@ -10,6 +10,31 @@ constants (:mod:`skrf.constants`)
 This module contains constants, numerical approximations, and unit conversions
 
 
+.. data:: INF
+
+    A very very large value (1e99)
+
+.. data:: ONE
+
+    1 + epsilon where epsilon is small. Used to avoid numerical error.
+
+.. data:: ZERO
+
+    0 + epsilon where epsilon is small. Used to avoid numerical error.
+
+.. data::K_BOLTZMANN
+
+    Boltzmann constant (1.38064852e-23)
+
+.. data::S_DEFINITIONS
+
+    S-parameter definition labels. Default is 'power'
+
+.. autosummary::
+   :toctree: generated/
+
+   to_meters
+
 '''
 
 from scipy.constants import c, micron, mil, inch, centi, milli, nano, micro,pi
@@ -20,6 +45,13 @@ from scipy.constants import c, micron, mil, inch, centi, milli, nano, micro,pi
 INF = 1e99
 ONE = 1.0 + 1/1e14
 ZERO = 1e-6
+
+K_BOLTZMANN = 1.38064852e-23
+T0 = 290.
+
+# S-parameter definition labels and default definition
+S_DEFINITIONS = ['power', 'pseudo', 'traveling']
+S_DEF_DEFAULT = 'power'
 
 global distance_dict
 distance_dict = {'m':1.,

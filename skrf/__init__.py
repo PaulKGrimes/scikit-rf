@@ -6,7 +6,7 @@ implemented in Python.
 from __future__ import absolute_import, print_function, division
 from six.moves import xrange 
 
-__version__ = '0.14.8'
+__version__ = '0.15.3'
 ## Import all  module names for coherent reference of name-space
 #import io
 
@@ -15,6 +15,7 @@ from . import frequency
 from . import network
 from . import networkSet
 from . import media
+from . import circuit
 
 from . import calibration
 # from . import plotting
@@ -33,6 +34,7 @@ from .network import *
 from .networkSet import *
 from .calibration import *
 from .util import *
+from .circuit import *
 # from .plotting import  *
 from .mathFunctions import *
 from .tlineFunctions import *
@@ -65,6 +67,7 @@ from copy import deepcopy as copy
 F = Frequency
 N = Network
 NS = NetworkSet
+C = Circuit
 lat = load_all_touchstones
 # saf  = save_all_figs
 saf = None

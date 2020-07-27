@@ -10,9 +10,9 @@ API
     frequency
     network
     networkSet
-    
+    circuit
+
     plotting
-    time
     mathFunctions
     tlineFunctions
     constants
@@ -21,5 +21,6 @@ API
     io/index
     calibration/index
     media/index
+    media/device
     vi/index
 
