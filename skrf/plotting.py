@@ -19,6 +19,25 @@ Plots and Charts
     plot_polar
     plot_complex_rectangular
     plot_complex_polar
+    plot_v_frequency
+    plot_it_all
+    
+    plot_minmax_bounds_component
+    plot_minmax_bounds_s_db
+    plot_minmax_bounds_s_db10
+    plot_minmax_bounds_s_time_db
+    
+    plot_uncertainty_bounds_component
+    plot_uncertainty_bounds_s
+    plot_uncertainty_bounds_s_db
+    plot_uncertainty_bounds_s_time_db
+    
+    plot_passivity    
+    plot_logsigma
+    
+    plot_circuit_graph
+
+    plot_contour
 
 Misc Functions
 -----------------
@@ -26,11 +45,13 @@ Misc Functions
 .. autosummary::
     :toctree: generated/
 
+    stylely
     save_all_figs
     add_markers_to_lines
     legend_off
     func_on_all_figs
     scrape_legend
+    signature
 
 '''
 import os
@@ -44,9 +65,15 @@ from matplotlib.pyplot import quiver
 from matplotlib import rcParams
 from matplotlib.dates import date2num
 
-from . import network, frequency, calibration, networkSet
+from . import network, frequency, calibration, networkSet, circuit
 from . import mathFunctions as mf
 from . util import now_string_2_dt
+import matplotlib.tri as tri
+
+try:
+    import networkx as nx
+except ImportError as e:
+    pass
 
 #from matplotlib.lines import Line2D            # for drawing smith chart
 
@@ -210,7 +237,7 @@ def smith(smithR=1, chart_type = 'z', draw_labels = False, border=False,
             spine.set_color('none')
 
         # Make annotations only if the radius is 1
-        if smithR is 1:
+        if smithR == 1:
             #Make room for annotation
             ax1.plot(npy.array([-1.25, 1.25]), npy.array([-1.1, 1.1]), 'w.', markersize = 0)
             ax1.axis('image')
@@ -221,10 +248,12 @@ def smith(smithR=1, chart_type = 'z', draw_labels = False, border=False,
                 # chart, y_flip_sign == 1) or right (Y chart, y_flip_sign == -1)
                 # so label doesn't overlap chart's circles
                 rho = (value - 1)/(value + 1) - y_flip_sign*0.01
-                if y_flip_sign is 1:
+                if y_flip_sign == 1:
                     halignstyle = "right"
                 else:
                     halignstyle = "left"
+                if y_flip_sign == -1:  # 'y' and 'yz' charts
+                    value = 1/value                          
                 ax1.annotate(str(value*ref_imm), xy=(rho*smithR, 0.01),
                     xytext=(rho*smithR, 0.01), ha = halignstyle, va = "baseline")
 
@@ -251,15 +280,21 @@ def smith(smithR=1, chart_type = 'z', draw_labels = False, border=False,
                     valignstyle = "top"
                 else:
                     valignstyle = "bottom"
+                if y_flip_sign == -1:  # 'y' and 'yz' charts
+                    value = 1/value                    
                 #Annotate value
                 ax1.annotate(str(value*ref_imm) + 'j', xy=(rhox, rhoy),
                              xytext=(rhox, rhoy), ha = halignstyle, va = valignstyle)
 
             #Annotate 0 and inf
-            ax1.annotate('0.0', xy=(-1.02, 0), xytext=(-1.02, 0),
-                         ha = "right", va = "center")
-            ax1.annotate('$\infty$', xy=(radialScaleFactor, 0), xytext=(radialScaleFactor, 0),
-                         ha = "left", va = "center")
+            if y_flip_sign == 1:  # z and zy charts
+                label_left, label_right = '0.0', '$\infty$'
+            else:  # y and yz charts
+                label_left, label_right = '$\infty$', '0.0'
+            ax1.annotate(label_left, xy=(-1.02, 0), xytext=(-1.02, 0),
+                             ha = "right", va = "center")
+            ax1.annotate(label_right, xy=(radialScaleFactor, 0), xytext=(radialScaleFactor, 0),
+                             ha = "left", va = "center")
 
             # annotate vswr circles
             for vswr in vswrVeryLightList:
@@ -758,6 +793,7 @@ def setup_matplotlib_plotting():
     networkSet.NetworkSet.plot_logsigma = plot_logsigma
     networkSet.NetworkSet.signature = signature
 
+    circuit.Circuit.plot_graph = plot_circuit_graph
 
 def __generate_plot_functions(self):
     '''
@@ -953,7 +989,7 @@ Examples
 
             def plot_func(self,  m=None, n=None, ax=None,
                           show_legend=True, attribute=attribute,
-                          y_label=y_label, pad=0, window='hamming', z0=50, *args, **kwargs):
+                          y_label=y_label, logx=False, pad=0, window='hamming', z0=50, *args, **kwargs):
 
                 # create index lists, if not provided by user
                 if m is None:
@@ -1032,22 +1068,27 @@ Examples
                                              y_label=y_label,
                                              show_legend=show_legend, ax=ax,
                                              *args, **kwargs)
-                            
+
                         else:
                             # plot the desired attribute vs frequency
                             if 'time' in attribute:
                                 xlabel = 'Time (ns)'
                                 x = self.frequency.t_ns
-    
+
                             else:
                                 xlabel = 'Frequency (%s)' % self.frequency.unit
                                 # x = self.frequency.f_scaled
                                 x = self.frequency.f  # always plot f, and then scale the ticks instead
 
-                                # scale the ticklabels according to the frequency unit:
+                                # scale the ticklabels according to the frequency unit and set log-scale if desired:
                                 if ax is None:
                                     ax = plb.gca()
+                                if logx:
+                                    ax.set_xscale('log')
+
                                 scale_frequency_ticks(ax, self.frequency.unit)
+								
+								
 
                             plot_rectangular(x=x,
                                              y=getattr(self, attribute)[:, m, n],
@@ -1077,6 +1118,8 @@ Examples
         Network attribute to plot
     y_label : string, optional
         the y-axis label
+    logx : Boolean, optional
+        Enable logarithmic x-axis, default off
 
     \*args,\\**kwargs : arguments, keyword arguments
         passed to :func:`matplotlib.plot`
@@ -1153,7 +1196,7 @@ def plot_v_frequency(self, y, *args, **kwargs):
 ## specific ploting functions
 def plot(self, *args, **kw):
     '''
-    plot somthing vs frequency
+    Plot something vs frequency
     '''
     return self.frequency.plot(*args, **kw)
 
@@ -1395,9 +1438,8 @@ def stylely(rc_dict={}, style_file = 'skrf.mplstyle'):
     '''
 
     from skrf.data import pwd # delayed to solve circular import
-    rc = mpl.rc_params_from_file(os.path.join(pwd, style_file))
-    mpl.rcParams.update(rc)
-    mpl.rcParams.update(rc_dict)
+    mpl.style.use(os.path.join(pwd, style_file))
+    mpl.rc(rc_dict)
 
 
 def plot_calibration_errors(self, *args, **kwargs):
@@ -1546,48 +1588,68 @@ def animate(self, attr='s_deg', ylims=(-5, 5), xlims=None, show=True,
         plb.ion()
 
 
+#------------------------------
+#
+# NetworkSet plotting functions
+#
+#------------------------------
+
 def plot_uncertainty_bounds_component(
         self, attribute, m=None, n=None,
         type='shade', n_deviations=3, alpha=.3, color_error=None, markevery_error=20,
         ax=None, ppf=None, kwargs_error={}, *args, **kwargs):
     '''
-    plots mean value of the NetworkSet with +- uncertainty bounds
-    in an Network's attribute. This is designed to represent
-    uncertainty in a scalar component of the s-parameter. for example
-    plotting the uncertainty in the magnitude would be expressed by,
-
+    plots mean value of a NetworkSet with +/- uncertainty bounds in an Network's attribute. 
+    
+    This is designed to represent uncertainty in a scalar component of the s-parameter. 
+    for example plotting the uncertainty in the magnitude would be expressed by,
+    .. maths::
             mean(abs(s)) +- std(abs(s))
 
     the order of mean and abs is important.
 
 
-    takes:
-            attribute: attribute of Network type to analyze [string]
-            m: first index of attribute matrix [int]
-            n: second index of attribute matrix [int]
-            type: ['shade' | 'bar'], type of plot to draw
-            n_deviations: number of std deviations to plot as bounds [number]
-            alpha: passed to matplotlib.fill_between() command. [number, 0-1]
-            color_error: color of the +- std dev fill shading
-            markevery_error: if type=='bar', this controls frequency
-                    of error bars
-            ax: Axes to plot on
-            ppf: post processing function. a function applied to the
-                    upper and lower bounds
-            *args,**kwargs: passed to Network.plot_s_re command used
-                    to plot mean response
-            kwargs_error: dictionary of kwargs to pass to the fill_between
-                    or errorbar plot command depending on value of type.
+    Parameters
+    ----------
+    attribute: str
+        attribute of Network type to analyze     
+    m: int
+        first index of attribute matrix 
+    n: int
+        second index of attribute matrix     
+    type: str
+        ['shade' | 'bar'], type of plot to draw
+    n_deviations: float
+        number of std deviations to plot as bounds
+    alpha: float
+        passed to matplotlib.fill_between() command. [number, 0-1]
+    color_error: str
+        color of the +- std dev fill shading. Default is None.
+    markevery_error: float
+        tbd
+    type: str
+        if type=='bar', this controls frequency of error bars
+    ax: matplotlib axe object
+        Axes to plot on. Default is None.
+    ppf: function
+        post processing function. a function applied to the
+        upper and lower bounds. Default is None
+    *args,**kwargs: 
+        passed to Network.plot_s_re command used to plot mean response
+     kwargs_error: dict
+         dictionary of kwargs to pass to the fill_between or 
+         errorbar plot command depending on value of type.
 
-    returns:
-            None
 
-
-    Note:
-            for phase uncertainty you probably want s_deg_unwrap, or
-            similar. uncerainty for wrapped phase blows up at +-pi.
+    Note
+    ----
+    for phase uncertainty you probably want s_deg_unwrap, or
+    similar. uncerainty for wrapped phase blows up at +-pi.
 
     '''
+
+    if ax is None:
+        ax = plb.gca()
 
     if m is None:
         M = range(self[0].number_of_ports)
@@ -1603,8 +1665,6 @@ def plot_uncertainty_bounds_component(
 
             plot_attribute = attribute
 
-            ax = plb.gca()
-
             ntwk_mean = self.__getattribute__('mean_'+attribute)
             ntwk_std = self.__getattribute__('std_'+attribute)
             ntwk_std.s = n_deviations * ntwk_std.s
@@ -1613,16 +1673,16 @@ def plot_uncertainty_bounds_component(
             lower_bound = (ntwk_mean.s[:, m, n] - ntwk_std.s[:, m, n]).squeeze()
 
             if ppf is not None:
-                if type =='bar':
+                if type == 'bar':
                     raise NotImplementedError('the \'ppf\' options don\'t work correctly with the bar-type error plots')
                 ntwk_mean.s = ppf(ntwk_mean.s)
                 upper_bound = ppf(upper_bound)
                 lower_bound = ppf(lower_bound)
-                lower_bound[npy.isnan(lower_bound)]=min(lower_bound)
+                lower_bound[npy.isnan(lower_bound)] = min(lower_bound)
                 if ppf in [mf.magnitude_2_db, mf.mag_2_db]:  # quickfix of wrong ylabels due to usage of ppf for *_db plots
-                    if attribute is 's_mag':
+                    if attribute == 's_mag':
                         plot_attribute = 's_db'
-                    elif attribute is 's_time_mag':
+                    elif attribute == 's_time_mag':
                         plot_attribute = 's_time_db'
 
             if type == 'shade':
@@ -1630,7 +1690,7 @@ def plot_uncertainty_bounds_component(
                 if color_error is None:
                     color_error = ax.get_lines()[-1].get_color()
                 ax.fill_between(ntwk_mean.frequency.f,
-                                lower_bound, upper_bound, alpha=alpha, color=color_error,
+                                lower_bound.real, upper_bound.real, alpha=alpha, color=color_error,
                                 **kwargs_error)
                 # ax.plot(ntwk_mean.frequency.f_scaled, ntwk_mean.s[:,m,n],*args,**kwargs)
 
@@ -1646,7 +1706,7 @@ def plot_uncertainty_bounds_component(
             else:
                 raise(ValueError('incorrect plot type'))
 
-            ax.set_ylabel(Y_LABEL_DICT.get(plot_attribute[2:],''))  # use only the function of the attribute
+            ax.set_ylabel(Y_LABEL_DICT.get(plot_attribute[2:], ''))  # use only the function of the attribute
             scale_frequency_ticks(ax, ntwk_mean.frequency.unit)
             ax.axis('tight')
 
@@ -1655,41 +1715,51 @@ def plot_minmax_bounds_component(self, attribute, m=0, n=0,
                                  type='shade', alpha=.3, color_error=None, markevery_error=20,
                                  ax=None, ppf=None, kwargs_error={}, *args, **kwargs):
     '''
-    plots mean value of the NetworkSet with +- uncertainty bounds
-    in an Network's attribute. This is designed to represent
-    uncertainty in a scalar component of the s-parameter. for example
+    plots mean value of the NetworkSet with +/- uncertainty bounds in an Network's attribute. 
+    
+    This is designed to represent uncertainty in a scalar component of the s-parameter. for example
     plotting the uncertainty in the magnitude would be expressed by,
-
+    .. maths::
             mean(abs(s)) +- std(abs(s))
 
     the order of mean and abs is important.
 
+    Parameters
+    ----------
+    attribute: str
+        attribute of Network type to analyze     
+    m: int
+        first index of attribute matrix 
+    n: int
+        second index of attribute matrix     
+    type: str
+        ['shade' | 'bar'], type of plot to draw
+    n_deviations: float
+        number of std deviations to plot as bounds
+    alpha: float
+        passed to matplotlib.fill_between() command. [number, 0-1]
+    color_error: str
+        color of the +- std dev fill shading. Default is None.
+    markevery_error: float
+        tbd
+    type: str
+        if type=='bar', this controls frequency of error bars
+    ax: matplotlib axe object
+        Axes to plot on. Default is None.
+    ppf: function
+        post processing function. a function applied to the
+        upper and lower bounds. Default is None
+    *args,**kwargs: 
+        passed to Network.plot_s_re command used to plot mean response
+     kwargs_error: dict
+         dictionary of kwargs to pass to the fill_between or 
+         errorbar plot command depending on value of type.
 
-    takes:
-            attribute: attribute of Network type to analyze [string]
-            m: first index of attribute matrix [int]
-            n: second index of attribute matrix [int]
-            type: ['shade' | 'bar'], type of plot to draw
-            n_deviations: number of std deviations to plot as bounds [number]
-            alpha: passed to matplotlib.fill_between() command. [number, 0-1]
-            color_error: color of the +- std dev fill shading
-            markevery_error: if type=='bar', this controls frequency
-                    of error bars
-            ax: Axes to plot on
-            ppf: post processing function. a function applied to the
-                    upper and low
-            *args,**kwargs: passed to Network.plot_s_re command used
-                    to plot mean response
-            kwargs_error: dictionary of kwargs to pass to the fill_between
-                    or errorbar plot command depending on value of type.
 
-    returns:
-            None
-
-
-    Note:
-            for phase uncertainty you probably want s_deg_unwrap, or
-            similar.  uncertainty for wrapped phase blows up at +-pi.
+    Note
+    ----
+    for phase uncertainty you probably want s_deg_unwrap, or
+    similar.  uncertainty for wrapped phase blows up at +-pi.
 
     '''
 
@@ -1709,9 +1779,9 @@ def plot_minmax_bounds_component(self, attribute, m=0, n=0,
         lower_bound = ppf(lower_bound)
         lower_bound[npy.isnan(lower_bound)]=min(lower_bound)
         if ppf in [mf.magnitude_2_db, mf.mag_2_db]: # quickfix of wrong ylabels due to usage of ppf for *_db plots
-            if attribute is 's_mag':
+            if attribute == 's_mag':
                 attribute = 's_db'
-            elif attribute is 's_time_mag':
+            elif attribute == 's_time_mag':
                 attribute = 's_time_db'
 
     if type == 'shade':
@@ -1741,18 +1811,18 @@ def plot_minmax_bounds_component(self, attribute, m=0, n=0,
 
 def plot_uncertainty_bounds_s_db(self, *args, **kwargs):
     '''
-    this just calls
-            plot_uncertainty_bounds(attribute= 's_mag','ppf':mf.magnitude_2_db*args,**kwargs)
+    Calls ``plot_uncertainty_bounds(attribute='s_mag','ppf':mf.magnitude_2_db*args,**kwargs)``
+    
     see plot_uncertainty_bounds for help
 
     '''
     kwargs.update({'attribute':'s_mag','ppf':mf.magnitude_2_db})
     self.plot_uncertainty_bounds_component(*args,**kwargs)
 
-def plot_minmax_bounds_s_db(self,*args, **kwargs):
+def plot_minmax_bounds_s_db(self, *args, **kwargs):
     '''
-    this just calls
-            plot_uncertainty_bounds(attribute= 's_mag','ppf':mf.magnitude_2_db*args,**kwargs)
+    Calls ``plot_uncertainty_bounds(attribute= 's_mag','ppf':mf.magnitude_2_db*args,**kwargs)``
+
     see plot_uncertainty_bounds for help
 
     '''
@@ -1761,8 +1831,8 @@ def plot_minmax_bounds_s_db(self,*args, **kwargs):
 
 def plot_minmax_bounds_s_db10(self,*args, **kwargs):
     '''
-    this just calls
-            plot_uncertainty_bounds(attribute= 's_mag','ppf':mf.magnitude_2_db*args,**kwargs)
+    Calls ``plot_uncertainty_bounds(attribute= 's_mag','ppf':mf.magnitude_2_db*args,**kwargs)``
+    
     see plot_uncertainty_bounds for help
 
     '''
@@ -1771,8 +1841,8 @@ def plot_minmax_bounds_s_db10(self,*args, **kwargs):
 
 def plot_uncertainty_bounds_s_time_db(self,*args, **kwargs):
     '''
-    this just calls
-            plot_uncertainty_bounds(attribute= 's_mag','ppf':mf.magnitude_2_db*args,**kwargs)
+    Calls ``plot_uncertainty_bounds(attribute= 's_mag','ppf':mf.magnitude_2_db*args,**kwargs)``
+    
     see plot_uncertainty_bounds for help
 
     '''
@@ -1781,8 +1851,8 @@ def plot_uncertainty_bounds_s_time_db(self,*args, **kwargs):
 
 def plot_minmax_bounds_s_time_db(self,*args, **kwargs):
     '''
-    this just calls
-            plot_uncertainty_bounds(attribute= 's_mag','ppf':mf.magnitude_2_db*args,**kwargs)
+    Calls ``plot_uncertainty_bounds(attribute= 's_mag','ppf':mf.magnitude_2_db*args,**kwargs)``
+    
     see plot_uncertainty_bounds for help
 
     '''
@@ -1865,19 +1935,20 @@ def plot_uncertainty_bounds_s(self, multiplier =200, *args, **kwargs):
     plb.show()
 
 def plot_logsigma(self, label_axis=True, *args,**kwargs):
-        '''
-        plots the uncertainty for the set in units of log-sigma.
-        Log-sigma is the complex standard deviation, plotted in units
-        of dB's.
+    '''
+    plots the uncertainty for the set in units of log-sigma.
+    
+    Log-sigma is the complex standard deviation, plotted in units
+    of dB's.
 
-        Parameters
-        ------------
-        \\*args, \\*\\*kwargs : arguments
-            passed to self.std_s.plot_s_db()
-        '''
-        self.std_s.plot_s_db(*args,**kwargs)
-        if label_axis:
-            plb.ylabel('Standard Deviation(dB)')
+    Parameters
+    ------------
+    \\*args, \\*\\*kwargs : arguments
+        passed to self.std_s.plot_s_db()
+    '''
+    self.std_s.plot_s_db(*args,**kwargs)
+    if label_axis:
+        plb.ylabel('Standard Deviation(dB)')
 
 def signature(self, m=0, n=0, component='s_mag',
               vmax=None, vs_time=False, cbar_label=None,
@@ -1959,3 +2030,191 @@ def signature(self, m=0, n=0, component='s_mag',
         cbar.set_label(cbar_label)
 
     return img
+
+def plot_circuit_graph(self, **kwargs):
+    '''
+    Plot the graph of the circuit using networkx drawing capabilities.
+
+    Customisation options with default values:
+    ::
+        'network_shape': 's'
+        'network_color': 'gray'
+        'network_size', 300
+        'network_fontsize': 7
+        'inter_shape': 'o'
+        'inter_color': 'lightblue'
+        'inter_size', 300
+        'port_shape': '>'
+        'port_color': 'red'
+        'port_size', 300
+        'port_fontsize': 7
+        'edges_fontsize': 5
+        'network_labels': False
+        'edge_labels': False
+        'inter_labels': False
+        'port_labels': False
+        'label_shift_x': 0
+        'label_shift_y': 0
+
+    '''
+    # Get the circuit graph. Will raise an error if the networkx package
+    # is not installed.
+    G = self.G
+
+    # default values
+    network_labels = kwargs.pop('network_labels', False)
+    network_shape = kwargs.pop('network_shape', 's')
+    network_color = kwargs.pop('network_color', 'gray')
+    network_fontsize = kwargs.pop('network_fontsize', 7)
+    network_size = kwargs.pop('network_size', 300)
+    inter_labels = kwargs.pop('inter_labels', False)
+    inter_shape = kwargs.pop('inter_shape', 'o')
+    inter_color = kwargs.pop('inter_color', 'lightblue')
+    inter_size = kwargs.pop('inter_size', 300)
+    port_labels = kwargs.pop('port_labels', False)
+    port_shape = kwargs.pop('port_shape', '>')
+    port_color = kwargs.pop('port_color', 'red')
+    port_size = kwargs.pop('port_size', 300)
+    port_fontsize = kwargs.pop('port_fontsize', 7)
+    edge_labels = kwargs.pop('edge_labels', False)
+    edge_fontsize = kwargs.pop('edge_fontsize', 5)
+    label_shift_x = kwargs.pop('label_shift_x', 0)
+    label_shift_y = kwargs.pop('label_shift_y', 0)
+
+    
+    # sort between network nodes and port nodes
+    all_ntw_names = [ntw.name for ntw in self.networks_list()]
+    port_names = [ntw_name for ntw_name in all_ntw_names if 'port' in ntw_name]
+    ntw_names = [ntw_name for ntw_name in all_ntw_names if 'port' not in ntw_name]
+    # generate connectins nodes names
+    int_names = ['X'+str(k) for k in range(self.connections_nb)]
+
+    fig, ax = plb.subplots(figsize=(10,8))
+
+    pos = nx.spring_layout(G)
+
+    # draw Networks
+    nx.draw_networkx_nodes(G, pos, port_names, ax=ax,
+                           node_size=port_size,
+                           node_color=port_color, node_shape=port_shape)
+    nx.draw_networkx_nodes(G, pos, ntw_names, ax=ax,
+                           node_size=network_size,
+                           node_color=network_color, node_shape=network_shape)
+    # draw intersections
+    nx.draw_networkx_nodes(G, pos, int_names, ax=ax,
+                           node_size=inter_size,
+                           node_color=inter_color, node_shape=inter_shape)
+    # labels shifts
+    pos_labels = {}
+    for node, coords in pos.items():
+        pos_labels[node] = (coords[0] + label_shift_x,
+                            coords[1] + label_shift_y)
+
+    # network labels
+    if network_labels:
+        network_labels = {lab:lab for lab in ntw_names}
+
+        nx.draw_networkx_labels(G, pos_labels, labels=network_labels,
+                                font_size=network_fontsize, ax=ax)
+
+    # intersection labels
+    if inter_labels:
+        inter_labels = {'X'+str(k):'X'+str(k) for k in range(self.connections_nb)}
+
+        nx.draw_networkx_labels(G, pos_labels, labels=inter_labels,
+                                font_size=network_fontsize, ax=ax)
+
+    # port labels
+    if port_labels:
+        port_labels = {lab:lab for lab in port_names}
+
+        nx.draw_networkx_labels(G, pos_labels, labels=port_labels,
+                                font_size=port_fontsize, ax=ax)
+
+    # draw edges
+    nx.draw_networkx_edges(G, pos, ax=ax)
+    if edge_labels:
+        edge_labels = self.edge_labels
+        nx.draw_networkx_edge_labels(G, pos,
+                                      edge_labels=edge_labels, label_pos=0.5,
+                                      font_size=edge_fontsize, ax=ax)
+    # remove x and y axis and labels
+    plb.axis('off')
+    plb.tight_layout()
+
+
+
+
+def plot_contour(freq, x, y, z, min0max1, graph=True, cmap='plasma_r', title='',  **kwargs):
+    '''
+    Countour plot
+
+    Parameters
+    ----------
+    freq : :skrf.Frequency:
+        Frequency object.
+    x : array
+        x points
+    y : array
+        y points.
+    z : array
+        z points.
+    min0max1 : int
+        0 for min, 1 for max.
+    graph : bool, optional
+        plot graph if True. The default is True.
+    cmap : str, optional
+        Colormap label. The default is 'plasma_r'.
+    title : str, optional
+        Figure title. The default is ''.
+    **kwargs : dict
+        Other parameters passed to `matplotlib.plot()`.
+
+    Returns
+    -------
+    GAMopt : :skrf.Network:
+        Network
+    VALopt : float
+        min or max.
+
+    '''
+    ri =  npy.linspace(0,1, 50); 
+    ti =  npy.linspace(0,2*npy.pi, 150);
+    Ri , Ti = npy.meshgrid(ri, ti)
+    xi = npy.linspace(-1,1, 50);    
+    Xi, Yi = npy.meshgrid(xi, xi)
+    triang = tri.Triangulation(x, y)
+    interpolator = tri.LinearTriInterpolator(triang, z)
+    Zi = interpolator(Xi, Yi)
+    if min0max1 == 1 : 
+        VALopt = npy.max(z)
+    else : 
+        VALopt = npy.min(z)
+    GAMopt = network.Network(f=[freq], s=x[z==VALopt] +1j*y[z==VALopt])
+
+    if graph : 
+        fig, ax = plb.subplots(**kwargs)
+        an = npy.linspace(0, 2*npy.pi, 50)
+        cs, sn = npy.cos(an), npy.sin(an)
+        plb.plot(cs, sn, color='k', lw=0.25)
+        plb.plot(cs, sn*0, color='g', lw=0.25)
+        plb.plot((1+cs)/2, sn/2, color='k', lw=0.25)
+        plb.axis('equal')
+        ax.set_axis_off()
+        ax.contour(Xi, Yi, Zi, levels=20, vmin=Zi.min(), vmax= Zi.max(), linewidths=0.5,  colors='k')
+        cntr1 = ax.contourf(Xi, Yi, Zi, levels=20, vmin=Zi.min(), vmax= Zi.max(),cmap=cmap)
+        fig.colorbar(cntr1, ax=ax)
+        ax.plot(x, y, 'o', ms=0.3, color='k')
+        ax.set(xlim=(-1, 1), ylim=(-1, 1))
+        plb.title(title)
+        plb.show()
+    return GAMopt, VALopt
+
+
+
+
+
+
+
+
+

@@ -1,0 +1,13 @@
+matplotlib
+scipy
+pandas
+nbsphinx
+ipython
+ipykernel
+ipywidgets
+jupyter_client
+python-ivi
+pyvisa
+networkx
+pathlib
+git+https://github.com/scikit-rf/scikit-rf.git@master

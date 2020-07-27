@@ -2,19 +2,21 @@
 
 '''
 .. module:: skrf.networkSet
+
 ========================================
 networkSet (:mod:`skrf.networkSet`)
 ========================================
 
-
-Provides a class representing an un-ordered set of n-port
-microwave networks.
+Provides a class representing an un-ordered set of n-port microwave networks.
 
 
 Frequently one needs to make calculations, such as mean or standard
 deviation, on an entire set of n-port networks. To facilitate these
 calculations the :class:`NetworkSet` class provides convenient
 ways to make such calculations.
+
+Another usage is to interpolate a set of Networks which depend of 
+an parameter (like a knob, or a geometrical parameter).
 
 The results are returned in :class:`~skrf.network.Network` objects, so they can be plotted and saved in the same way one would do with a
 :class:`~skrf.network.Network`.
@@ -31,6 +33,14 @@ NetworkSet Class
 
    NetworkSet
 
+NetworkSet Utilities
+====================
+
+.. autosummary::
+   :toctree: generated/
+   
+   func_on_networks
+   getset
 
 
 '''
@@ -44,6 +54,7 @@ import zipfile
 from copy import deepcopy
 import warnings
 import numpy as npy
+from scipy.interpolate import interp1d
 # import matplotlib.pyplot as plb
 from . util import now_string_2_dt
 # delayed imports due to circular dependencies
@@ -383,7 +394,7 @@ class NetworkSet(object):
         '''
         def plot_func(self,*args, **kwargs):
             kwargs.update({'attribute':network_property_name})
-            self.plot_uncertainty_bounds_component(*args,**kwargs)
+            plot_uncertainty_bounds_component(*args,**kwargs)
 
         setattr(self.__class__,'plot_uncertainty_bounds_'+\
                 network_property_name,plot_func)
@@ -629,61 +640,7 @@ class NetworkSet(object):
         '''
         return fon(self.ntwk_set, func, a_property, *args, **kwargs)
 
-    # plotting functions
-    #def plot_uncertainty_bounds(self,attribute='s_mag',m=0,n=0,\
-        #n_deviations=3, alpha=.3,fill_color ='b',std_attribute=None,*args,**kwargs):
-        #'''
-        #plots mean value with +- uncertainty bounds in an Network attribute,
-        #for a list of Networks.
-
-        #takes:
-            #attribute: attribute of Network type to analyze [string]
-            #m: first index of attribute matrix [int]
-            #n: second index of attribute matrix [int]
-            #n_deviations: number of std deviations to plot as bounds [number]
-            #alpha: passed to matplotlib.fill_between() command. [number, 0-1]
-            #*args,**kwargs: passed to Network.plot_'attribute' command
-
-        #returns:
-            #None
-
-
-        #Caution:
-            #if your list_of_networks is for a calibrated short, then the
-            #std dev of deg_unwrap might blow up, because even though each
-            #network is unwrapped, they may fall on either side fo the pi
-            #relative to one another.
-        #'''
-
-        ## calculate mean response, and std dev of given attribute
-        #ntwk_mean = average(self.ntwk_set)
-        #if std_attribute is None:
-            ## they want to calculate teh std deviation on a different attribute
-            #std_attribute = attribute
-        #ntwk_std = func_on_networks(self.ntwk_set,npy.std, attribute=std_attribute)
-
-        ## pull out port of interest
-        #ntwk_mean.s = ntwk_mean.s[:,m,n]
-        #ntwk_std.s = ntwk_std.s[:,m,n]
-
-        ## create bounds (the s_mag here is confusing but is realy in units
-        ## of whatever 'attribute' is. read the func_on_networks call to understand
-        #upper_bound =  ntwk_mean.__getattribute__(attribute) +\
-            #ntwk_std.s_mag*n_deviations
-        #lower_bound =   ntwk_mean.__getattribute__(attribute) -\
-            #ntwk_std.s_mag*n_deviations
-
-        ## find the correct ploting method
-        #plot_func = ntwk_mean.__getattribute__('plot_'+attribute)
-
-        ##plot mean response
-        #plot_func(*args,**kwargs)
-
-        ##plot bounds
-        #plb.fill_between(ntwk_mean.frequency.f_scaled, \
-            #lower_bound.squeeze(),upper_bound.squeeze(), alpha=alpha, color=fill_color)
-        #plb.axis('tight')
-        #plb.draw()
+  
 
     def uncertainty_ntwk_triplet(self, attribute,n_deviations=3):
         '''
@@ -793,8 +750,42 @@ class NetworkSet(object):
             )
         return df
 
-def plot_uncertainty_bounds_s_db(ntwk_list, *args, **kwargs):
-    NetworkSet(ntwk_list).plot_uncertainty_bounds_s_db(*args, **kwargs)
+    def interpolate_from_network(self, ntw_param, x, interp_kind='linear'):
+        '''
+        Interpolate a Network from a NetworkSet, as a multi-file N-port network.
+        
+        Assumes that the NetworkSet contains N-port networks 
+        with same number of ports N and same number of frequency points. 
+        
+        These networks differ from an given array parameter `interp_param`, 
+        which is used to interpolate the returned Network. Length of `interp_param`
+        should be equal to the length of the NetworkSet.
+        
+        Parameters
+        ----------
+        ntw_param : (N,) array_like 
+            A 1-D array of real values. The length of ntw_param must be equal
+            to the length of the NetworkSet
+        x : real
+            Point to evaluate the interpolated network at
+        interp_kind: str
+            Specifies the kind of interpolation as a string: 'linear', 'nearest', 'zero', 'slinear', 'quadratic', 'cubic'.  Cf :class:`scipy.interpolate.interp1d` for detailled description.
+            Default is 'linear'.
+           
+        Returns
+        -------
+        ntw : class:`~skrf.network.Network`
+            Network interpolated at x
+        
+        '''              
+        ntw = self[0].copy()
+        # Interpolating the scattering parameters 
+        s = npy.array([self[idx].s for idx in range(len(self))])
+        f = interp1d(ntw_param, s, axis=0, kind=interp_kind)
+        ntw.s = f(x)
+        
+        return ntw
+    
 
 def func_on_networks(ntwk_list, func, attribute='s',name=None, *args,\
         **kwargs):
@@ -881,3 +872,25 @@ def getset(ntwk_dict, s, *args, **kwargs):
     else:
         print('Warning: No keys in ntwk_dict contain \'%s\''%s)
         return None
+
+
+def tuner_constellation(name='tuner', singlefreq=76, Z0=50, r_lin = 9, phi_lin=21, TNWformat=True):            
+    r = npy.linspace(0.1,0.9,r_lin)
+    a = npy.linspace(0,2*npy.pi,phi_lin)
+    r_, a_ = npy.meshgrid(r,a)
+    c_ = r_ *npy.exp(1j * a_)
+    g= c_.flatten()
+    x =  npy.real(g)
+    y =  npy.imag(g)
+    
+    if TNWformat :
+        TNL = dict()
+        # for ii, gi in enumerate(g) :
+        for ii, gi in enumerate(g) :
+            TNL['pos'+str(ii)] = Network(f = [singlefreq ], s=[[[gi]]], z0=[[Z0]], name=name +'_' + str(ii))
+        TNW = NetworkSet(TNL, name=name)
+        return TNW, x,y,g
+    else :  
+        return x,y,g
+
+
