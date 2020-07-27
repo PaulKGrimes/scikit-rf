@@ -62,6 +62,49 @@ void innerconnect_s(double *freq, int nFreq, complex *A, int nA, int k, int l, c
     free(C); return;
 }
 
+void innerconnect_c(double *freq, int nFreq, complex *A, complex *cA, int nA, int k, int l, complex *cD, int nD){
+    /*
+     freq - 1D array of freqeuncy values
+     nFreq - length(freq)
+     A - nFreq x nA x nA complex-valued scattering matrix array of composite network
+     cA - nFreq x nA complex-valued noise vector array of composite network
+     nA - number of ports for composite network A
+     k - port index to connect on original network A (starts at 0)
+     nB - number of ports for network B
+     l - port index to connect on original network B (starts at 0)
+     cD - nFreq x nD  complex-valued noise vector array of composite network
+     */
+
+    //C = connected matrix (temporary)
+    complex *cc = malloc(nFreq*nA*sizeof(complex));
+
+    //populate connected matrix
+    int q, s;
+    for (s = 0; s < nFreq; s++){ //for each freq point
+        for(q = 0; q < nA; q++){ //for each row of A
+            complex a;
+            // Calculate a
+            a = 1 / ( (1-A[s*nA*nA+q*nA+l])*(1-A[s*nA*nA+l*nA+q]) - A[s*nA*nA+k*nA+q]*A[s*nA*nA+l*nA+l] );
+            //write connected element into C
+            cc[s*nA+q] = cA[s*nA+q] + a * ((A[s*nA*nA+q*nA+l]*A[s*nA*nA+nA*k+k] + A[s*nA*nA+nA*q+k]*(1 - A[s*nA*nA+nA*k+l])])*c[s*nA + l] + (A[s*nA*nA+q*nA+k]*A[s*nA*nA+nA*l+l] + A[s*nA*nA+nA*q+l]*(1 - A[s*nA*nA+nA*l+k])])*c[s*nA + k]);
+        }
+    }
+
+    //create result matrix -- remove rows 'k'
+    int curRow; //"pointer" to next S-param to write
+    for(s = 0; s < nFreq; s++){ //for each freq point
+        curRow = 0; curCol = 0; //init pointer to S11
+        for(q = 0; q < nA; q++){ // for each row
+            if(q != k && q != l){ // if not on row 'k' or 'l'
+            {
+                D[s*nD+curRow] = cc[s*nA+q];
+                curRow++; //hmove to next row
+            }
+        }
+    }
+
+    free(cc); return;
+}
 
 void connect_s(double *freq, int nFreq, complex *A, int nA, int k, complex *B, int nB, int l, complex *D, int nD){ 
     /*
