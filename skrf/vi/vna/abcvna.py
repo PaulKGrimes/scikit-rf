@@ -58,7 +58,7 @@ class VNA(object):
         address : str
             a visa resource string, or an ip address
         kwargs : dict
-            visa_library (str), timemout in milliseconds (int), card_number
+            visa_library (str), timeout in milliseconds (int), card_number
             (int), interface (str)
 
         Notes
@@ -102,14 +102,13 @@ class VNA(object):
 
         self.resource.read_termination = "\n"  # most queries are terminated with a newline
         self.resource.write_termination = "\n"
-        if "instr" in resource_string.lower():
+        if "instr" in resource_string.lower() and interface.lower()=="gpib":
             self.resource.control_ren(2)
 
         # convenience pyvisa functions
         self.write = self.resource.write
         self.read = self.resource.read
         self.query = self.resource.query
-        self.query_values = self.resource.query_values
 
     def __enter__(self):
         """
@@ -327,7 +326,7 @@ class VNA(object):
         Parameters
         ----------
         freq : float or np.ndarray
-            a float or numpy.ndarray of floats of the frequency in f_units
+            a float or npy.ndarray of floats of the frequency in f_units
         f_unit : str
             the units of frequency (Hz, kHz, MHz, GHz, THz)
 

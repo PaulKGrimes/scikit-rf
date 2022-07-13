@@ -23,8 +23,8 @@ class DefinedGammaZ0TestCase(unittest.TestCase):
             )
 
     def test_impedance_mismatch(self):
-        '''
-        '''
+        """
+        """
         fname = os.path.join(self.files_dir,\
                 'impedanceMismatch,50to25.s2p')
         qucs_ntwk = Network(fname)
@@ -35,8 +35,8 @@ class DefinedGammaZ0TestCase(unittest.TestCase):
         self.assertEqual(qucs_ntwk, skrf_ntwk)
 
     def test_resistor(self):
-        '''
-        '''
+        """
+        """
         fname = os.path.join(self.files_dir,\
                 'resistor,1ohm.s2p')
         qucs_ntwk = Network(fname)
@@ -45,8 +45,8 @@ class DefinedGammaZ0TestCase(unittest.TestCase):
         self.assertEqual(qucs_ntwk, skrf_ntwk)
 
     def test_capacitor(self):
-        '''
-        '''
+        """
+        """
         fname = os.path.join(self.files_dir,\
                 'capacitor,p01pF.s2p')
         qucs_ntwk = Network(fname)
@@ -56,8 +56,8 @@ class DefinedGammaZ0TestCase(unittest.TestCase):
 
 
     def test_inductor(self):
-        '''
-        '''
+        """
+        """
         fname = os.path.join(self.files_dir,\
                 'inductor,p1nH.s2p')
         qucs_ntwk = Network(fname)
@@ -67,35 +67,29 @@ class DefinedGammaZ0TestCase(unittest.TestCase):
 
 
     def test_scalar_gamma_z0_media(self):
-        '''
-        test ability to create a Media from scalar quanties for gamma/z0
-        and change frequency resolution
-        '''
-        a = DefinedGammaZ0 (Frequency(1,10,101),gamma=1j,z0 = 50)
-        self.assertEqual(a.line(1),a.line(1))
-
-        # we should be able to re-sample the media
-        a.npoints = 21
-        self.assertEqual(len(a.gamma), len(a))
-        self.assertEqual(len(a.z0), len(a))
-        self.assertEqual(len(a.z0), len(a))
+        """
+        test ability to create a Media from scalar quantities for gamma/z0
+        """
+        freq = Frequency(1,10,101)
+        a = DefinedGammaZ0(freq, gamma=1j, z0=50)
+        self.assertEqual(len(freq), len(a))
+        self.assertEqual(len(freq), len(a.gamma))
+        self.assertEqual(len(freq), len(a.z0))
 
 
     def test_vector_gamma_z0_media(self):
-        '''
-        test ability to create a Media from vector quanties for gamma/z0
-        '''
+        """
+        test ability to create a Media from vector quantities for gamma/z0
+        """
         freq = Frequency(1,10,101)
         a = DefinedGammaZ0(freq,
                            gamma = 1j*npy.ones(len(freq)) ,
                            z0 =  50*npy.ones(len(freq)),
                             )
-
-
-        self.assertEqual(a.line(1),a.line(1))
-        with self.assertRaises(NotImplementedError):
-            a.npoints=4
-
+        self.assertEqual(len(freq), len(a))
+        self.assertEqual(len(freq), len(a.gamma))
+        self.assertEqual(len(freq), len(a.z0))
+        
     def test_write_csv(self):
         fname = os.path.join(self.files_dir,\
                 'out.csv')
@@ -113,9 +107,9 @@ class DefinedGammaZ0TestCase(unittest.TestCase):
 
 
 class STwoPortsNetworkTestCase(unittest.TestCase):
-    '''
+    """
     Check that S parameters of media base elements versus theoretical results.
-    '''
+    """
     def setUp(self):
         self.dummy_media = DefinedGammaZ0(
             frequency=Frequency(1, 100, 21, 'GHz'),
@@ -124,7 +118,7 @@ class STwoPortsNetworkTestCase(unittest.TestCase):
             )
 
     def test_s_series_element(self):
-        '''
+        """
         Series elements of impedance Z:
 
         ○---[Z]---○
@@ -134,7 +128,7 @@ class STwoPortsNetworkTestCase(unittest.TestCase):
         have S matrix of the form:
         [ Z/Z0 / (Z/Z0 + 2)     2/(Z/Z0 + 2) ]
         [ 2/(Z/Z0 + 2)          Z/Z0 / (Z/Z0 + 2) ]
-        '''
+        """
         R = 1.0  # Ohm
         ntw = self.dummy_media.resistor(R)
         Z0 = self.dummy_media.z0
@@ -146,7 +140,7 @@ class STwoPortsNetworkTestCase(unittest.TestCase):
         npy.testing.assert_array_almost_equal(ntw.s[:,1,1], S11)
 
     def test_s_shunt_element(self):
-        '''
+        """
         Shunt elements of admittance Y:
 
         ○---------○
@@ -158,7 +152,7 @@ class STwoPortsNetworkTestCase(unittest.TestCase):
         have S matrix of the form:
         [ -Y Z0 / (Y Z0 + 2)     2/(Y Z0 + 2) ]
         [ 2/(Y Z0 + 2)          Z/Z0 / (Y Z0 + 2) ]
-        '''
+        """
         R = 1.0  # Ohm
         ntw = self.dummy_media.shunt(self.dummy_media.resistor(R)**self.dummy_media.short())
         Z0 = self.dummy_media.z0
@@ -170,7 +164,7 @@ class STwoPortsNetworkTestCase(unittest.TestCase):
         npy.testing.assert_array_almost_equal(ntw.s[:,1,1], S11)
 
     def test_s_lossless_line(self):
-        '''
+        """
         Lossless transmission line of characteristic impedance z1, length l
         and wavenumber beta
               _______
@@ -178,7 +172,7 @@ class STwoPortsNetworkTestCase(unittest.TestCase):
           z0     z1    z0
         ○-----_______-----○
 
-        '''
+        """
         l = 5.0
         z1 = 30.0
         z0 = self.dummy_media.z0
@@ -199,7 +193,7 @@ class STwoPortsNetworkTestCase(unittest.TestCase):
         npy.testing.assert_array_almost_equal(ntw.s[:,1,1], S11)
 
     def test_s_lossy_line(self):
-        '''
+        """
         Lossy transmission line of characteristic impedance Z0, length l
         and propagation constant gamma = alpha + j beta
 
@@ -211,14 +205,14 @@ class STwoPortsNetworkTestCase(unittest.TestCase):
 
         [ cosh(gamma l)       Z0 sinh(gamma l) ]
         [ 1/Z0 sinh(gamma l)  cosh(gamma l) ]
-        '''
+        """
 
 
 class ABCDTwoPortsNetworkTestCase(unittest.TestCase):
-    '''
+    """
     Check that ABCD parameters of media base elements (such as lumped elements)
     versus theoretical results.
-    '''
+    """
     def setUp(self):
         self.dummy_media = DefinedGammaZ0(
             frequency=Frequency(1, 100, 21,'GHz'),
@@ -227,7 +221,7 @@ class ABCDTwoPortsNetworkTestCase(unittest.TestCase):
             )
 
     def test_abcd_series_element(self):
-        '''
+        """
         Series elements of impedance Z:
 
         ○---[Z]---○
@@ -237,7 +231,7 @@ class ABCDTwoPortsNetworkTestCase(unittest.TestCase):
         have ABCD matrix of the form:
         [ 1  Z ]
         [ 0  1 ]
-        '''
+        """
         R = 1.0  # Ohm
         ntw = self.dummy_media.resistor(R)
         npy.testing.assert_array_almost_equal(ntw.a[:,0,0], 1.0)
@@ -246,7 +240,7 @@ class ABCDTwoPortsNetworkTestCase(unittest.TestCase):
         npy.testing.assert_array_almost_equal(ntw.a[:,1,1], 1.0)
 
     def test_abcd_shunt_element(self):
-        '''
+        """
         Shunt elements of admittance Y:
 
         ○---------○
@@ -258,7 +252,7 @@ class ABCDTwoPortsNetworkTestCase(unittest.TestCase):
         have ABCD matrix of the form:
         [ 1  0 ]
         [ Y  1 ]
-        '''
+        """
         R = 1.0  # Ohm
         ntw = self.dummy_media.shunt(self.dummy_media.resistor(R)**self.dummy_media.short())
         npy.testing.assert_array_almost_equal(ntw.a[:,0,0], 1.0)
@@ -267,7 +261,7 @@ class ABCDTwoPortsNetworkTestCase(unittest.TestCase):
         npy.testing.assert_array_almost_equal(ntw.a[:,1,1], 1.0)
 
     def test_abcd_series_shunt_elements(self):
-        '''
+        """
         Series and Shunt elements of impedance Zs and Zp:
 
         ○---[Zs]--------○
@@ -278,7 +272,7 @@ class ABCDTwoPortsNetworkTestCase(unittest.TestCase):
         have ABCD matrix of the form:
         [ 1 + Zs/Zp    Zs ]
         [ 1/Zp          1 ]
-        '''
+        """
         Rs = 2.0
         Rp = 3.0
         serie_resistor = self.dummy_media.resistor(Rs)
@@ -292,11 +286,11 @@ class ABCDTwoPortsNetworkTestCase(unittest.TestCase):
         npy.testing.assert_array_almost_equal(ntw.a[:,1,1], 1.0)
 
     def test_abcd_thru(self):
-        '''
+        """
         Thru has ABCD matrix of the form:
         [ 1  0 ]
         [ 0  1 ]
-        '''
+        """
         ntw = self.dummy_media.thru()
         npy.testing.assert_array_almost_equal(ntw.a[:,0,0], 1.0)
         npy.testing.assert_array_almost_equal(ntw.a[:,0,1], 0.0)
@@ -304,7 +298,7 @@ class ABCDTwoPortsNetworkTestCase(unittest.TestCase):
         npy.testing.assert_array_almost_equal(ntw.a[:,1,1], 1.0)
 
     def test_abcd_lossless_line(self):
-        '''
+        """
         Lossless transmission line of characteristic impedance Z0, length l
         and wavenumber beta
 
@@ -316,7 +310,7 @@ class ABCDTwoPortsNetworkTestCase(unittest.TestCase):
 
         [ cos(beta l)       j Z0 sin(beta l) ]
         [ j/Z0 sin(beta l)  cos(beta l) ]
-        '''
+        """
         l = 5
         z0 = 80
         ntw = self.dummy_media.line(d=l, unit='m', z0=z0)
@@ -327,7 +321,7 @@ class ABCDTwoPortsNetworkTestCase(unittest.TestCase):
         npy.testing.assert_array_almost_equal(ntw.a[:,1,1], npy.cos(beta*l))
 
     def test_abcd_lossy_line(self):
-        '''
+        """
         Lossy transmission line of characteristic impedance Z0, length l
         and propagation constant gamma = alpha + j beta
 
@@ -339,7 +333,7 @@ class ABCDTwoPortsNetworkTestCase(unittest.TestCase):
 
         [ cosh(gamma l)       Z0 sinh(gamma l) ]
         [ 1/Z0 sinh(gamma l)  cosh(gamma l) ]
-        '''
+        """
         l = 5.0
         z0 = 30.0
         alpha = 0.5
@@ -355,3 +349,53 @@ class ABCDTwoPortsNetworkTestCase(unittest.TestCase):
         npy.testing.assert_array_almost_equal(ntw.a[:,0,1], z0*npy.sinh(gamma*l))
         npy.testing.assert_array_almost_equal(ntw.a[:,1,0], 1.0/z0*npy.sinh(gamma*l))
         npy.testing.assert_array_almost_equal(ntw.a[:,1,1], npy.cosh(gamma*l))
+
+class DefinedGammaZ0_s_def(unittest.TestCase):
+    """Test various media constructs with complex ports and different s_def"""
+
+    def test_complex_ports(self):
+        m = DefinedGammaZ0(
+            frequency = Frequency(1,1,1,'ghz'),
+            gamma=1j,
+            z0 = 50,
+            Z0 = 10+20j,
+            )
+        self.assertTrue(m.Z0.imag != 0)
+
+        # Powerwave short is -Z0.conj()/Z0
+        short = m.short(z0=m.Z0, s_def='power')
+        self.assertTrue(short.s != -1)
+        # Should be -1 when converted to traveling s_def
+        npy.testing.assert_allclose(short.s_traveling, -1)
+
+        short = m.short(z0=m.Z0, s_def='traveling')
+        npy.testing.assert_allclose(short.s, -1)
+
+        short = m.short(z0=m.Z0, s_def='pseudo')
+        npy.testing.assert_allclose(short.s, -1)
+
+        # Mismatches agree with real port impedances
+        mismatch_traveling = m.impedance_mismatch(z1=10, z2=50, s_def='traveling')
+        mismatch_pseudo = m.impedance_mismatch(z1=10, z2=50, s_def='pseudo')
+        mismatch_power = m.impedance_mismatch(z1=10, z2=50, s_def='power')
+        npy.testing.assert_allclose(mismatch_traveling.s, mismatch_pseudo.s)
+        npy.testing.assert_allclose(mismatch_traveling.s, mismatch_power.s)
+
+        mismatch_traveling = m.impedance_mismatch(z1=10+10j, z2=50-20j, s_def='traveling')
+        mismatch_pseudo = m.impedance_mismatch(z1=10+10j, z2=50-20j, s_def='pseudo')
+        mismatch_power = m.impedance_mismatch(z1=10+10j, z2=50-20j, s_def='power')
+
+        # Converting thru to new impedance should give impedance mismatch.
+        # The problem is that thru Z-parameters have infinities
+        # and renormalization goes through Z-parameters making
+        # it very inaccurate.
+        thru_traveling = m.thru(s_def='traveling')
+        thru_traveling.renormalize(z_new=[10+10j,50-20j])
+        thru_pseudo = m.thru(s_def='pseudo')
+        thru_pseudo.renormalize(z_new=[10+10j,50-20j])
+        thru_power = m.thru(s_def='power')
+        thru_power.renormalize(z_new=[10+10j,50-20j])
+
+        npy.testing.assert_allclose(thru_traveling.s, mismatch_traveling.s, rtol=1e-3)
+        npy.testing.assert_allclose(thru_pseudo.s, mismatch_pseudo.s, rtol=1e-3)
+        npy.testing.assert_allclose(thru_power.s, mismatch_power.s, rtol=1e-3)

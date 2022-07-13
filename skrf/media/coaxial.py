@@ -1,8 +1,5 @@
 # -*- coding: utf-8 -*-
-'''
-.. module:: skrf.media.coaxial
-
-============================================================
+"""
 coaxial (:mod:`skrf.media.coaxial`)
 ============================================================
 
@@ -13,65 +10,70 @@ A coaxial transmission line defined from its electrical or geometrical/physical 
 
    Coaxial
 
-'''
+"""
 
 #from copy import deepcopy
 from scipy.constants import  epsilon_0, mu_0, pi, c
-from numpy import sqrt, log, real, imag, exp, size
-from ..tlineFunctions import surface_resistivity
+from numpy import sqrt, log, real, imag, exp, expm1, size
+from ..tlineFunctions import surface_resistivity, skin_depth
 from .distributedCircuit import DistributedCircuit
 from .media import Media, DefinedGammaZ0
-from ..constants import INF
+from ..constants import INF, NumberLike
 from ..mathFunctions import feet_2_meter, db_per_100feet_2_db_per_100meter, db_2_np
+from typing import Union, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .. frequency import Frequency
+    from .. network import Network
 
 
-class Coaxial( DistributedCircuit,Media ):
-    '''
+class Coaxial(DistributedCircuit, Media):
+    """
     A coaxial transmission line defined in terms of its inner/outer
-    diameters and permittivity
-
-
+    diameters and permittivity.
 
     Parameters
     ----------
     frequency : :class:`~skrf.frequency.Frequency` object
-
+        Frequency band.
     z0 : number, array-like, or None
-        the port impedance for media. Only needed if  its different
-        from the characterisitc impedance of the transmission
+        the port impedance for media. Only needed if its different
+        from the characteristic impedance of the transmission
         line. if z0 is None then will default to Z0
     Dint : number, or array-like
         inner conductor diameter, in m
     Dout : number, or array-like
         outer conductor diameter, in m
-    epsilon_r=1 : number, or array-like
-        relative permittivity of the dielectric medium
-    tan_delta=0 : number, or array-like
-        loss tangent of the dielectric medium
-    sigma=infinity : number, or array-like
-        conductors electrical conductivity, in S/m
+    epsilon_r : number, or array-like, optional
+        relative permittivity of the dielectric medium. 
+        Default is 1.
+    tan_delta : number, or array-like, optional
+        loss tangent of the dielectric medium.
+        Default is 0.
+    sigma : number, or array-like, optional.
+        conductors electrical conductivity, in S/m.
+        Default is infinity (non lossy metal).
 
 
     TODO : different conductivity in case of different conductor kind
 
-    Notes
-    ----------
+    Note
+    ----
     Dint, Dout, epsilon_r, tan_delta, sigma can all be vectors as long
     as they are the same length
 
     References
-    ---------
+    ----------
     .. [#] Pozar, D.M.; , "Microwave Engineering", Wiley India Pvt. Limited, 1 sept. 2009
 
-
-
-        '''
+    """
     ## CONSTRUCTOR
-    def __init__(self, frequency=None,  z0=None, Dint=.81e-3,
-                 Dout=5e-3, epsilon_r=1, tan_delta=0, sigma=INF,
+    def __init__(self, frequency: Union['Frequency', None] = None,
+                 z0: Union[NumberLike, None] = None, 
+                 Dint: NumberLike = .81e-3, Dout: NumberLike = 5e-3, 
+                 epsilon_r: NumberLike = 1, tan_delta: NumberLike = 0, 
+                 sigma: NumberLike = INF,
                  *args, **kwargs):
-
-
 
         Media.__init__(self, frequency=frequency,z0=z0)
 
@@ -81,8 +83,9 @@ class Coaxial( DistributedCircuit,Media ):
         self.epsilon_second = epsilon_0*self.epsilon_r*self.tan_delta
 
     @classmethod
-    def from_attenuation_VF(cls, frequency=None, z0=None, Z0=50,
-                         att=0, unit='dB/m', VF=1):
+    def from_attenuation_VF(cls, frequency: Union['Frequency', None] = None, 
+                            z0: Union[NumberLike, None] = None, Z0: float = 50,
+                         att=0, unit='dB/m', VF=1) -> Media:
         """
         Init from electrical properties of the line: attenuation and velocity factor.
 
@@ -95,7 +98,7 @@ class Coaxial( DistributedCircuit,Media ):
 
         z0 : number, array-like, or None
             the port impedance for media. Only needed if its different
-            from the characterisitc impedance of the transmission
+            from the characteristic impedance of the transmission
             line. if z0 is None then will default to Z0
         Z0 : number
             desired characteristic impedance
@@ -108,6 +111,10 @@ class Coaxial( DistributedCircuit,Media ):
         VF : number, or array-like. optional
             Velocity Factor VF [VF]_. The default is 1.
             If passed as an array, should be of same size than the frequency.
+            
+        Returns
+        -------
+        media : :class:`~skrf.media.media.Media`
 
         References
         ----------
@@ -146,10 +153,12 @@ class Coaxial( DistributedCircuit,Media ):
                                     z0=z0, Z0=Z0)
 
     @classmethod
-    def from_Z0_Dout(cls, frequency=None, z0=None,Z0=50,  epsilon_r=1,
-                     Dout=5e-3, **kw):
-        '''
-        Init from characteristic impedance and outer diameter
+    def from_Z0_Dout(cls, frequency: Union['Frequency', None] = None, 
+                     z0: Union[NumberLike, None] = None, Z0: float = 50,  
+                     epsilon_r: NumberLike = 1, Dout: NumberLike = 5e-3, 
+                     **kw) -> Media:
+        """
+        Init from characteristic impedance and outer diameter.
 
         Parameters
         ----------
@@ -157,7 +166,7 @@ class Coaxial( DistributedCircuit,Media ):
 
         z0 : number, array-like, or None
             the port impedance for media. Only needed if  its different
-            from the characterisitc impedance of the transmission
+            from the characteristic impedance of the transmission
             line. if z0 is None then will default to Z0
         Z0 : number
             desired characteristic impedance
@@ -167,7 +176,11 @@ class Coaxial( DistributedCircuit,Media ):
             relative permittivity of the dielectric medium
         **kw :
             passed to __init__
-        '''
+
+        Returns
+        -------
+        media : :class:`~skrf.media.media.Media`            
+        """
         ep= epsilon_0*epsilon_r
 
         if imag(Z0) !=0:
@@ -182,24 +195,24 @@ class Coaxial( DistributedCircuit,Media ):
 
 
     @property
-    def Rs(self):
-        '''
-        Surface resistivity in Ohm/area
+    def Rs(self) -> NumberLike:
+        """
+        Surface resistivity in Ohm/area.
 
         Returns
         -------
         Rs : number or array
             surface resistivity
 
-        '''
+        """
         f  = self.frequency.f
         rho = 1./self.sigma
         mu_r =1
         return surface_resistivity(f=f,rho=rho, mu_r=mu_r)
 
     @property
-    def a(self):
-        '''
+    def a(self) -> NumberLike:
+        """
         Inner radius of the coaxial line
 
         Returns
@@ -207,39 +220,52 @@ class Coaxial( DistributedCircuit,Media ):
         a : float
             Inner radius
 
-        '''
+        """
         return self.Dint/2.
 
     @property
-    def b(self):
-        '''
+    def b(self) -> NumberLike:
+        """
         Outer radius of the coaxial line
-        
+
         Returns
         -------
         b : float
             Outer radius
-        '''
+        """
         return self.Dout/2.
-
 
     # derivation of distributed circuit parameters
     @property
-    def R(self):
-        '''
-        Distributed resistance R, in Ohm/m
+    def R(self) -> NumberLike:
+        """
+        Distributed resistance R, in Ohm/m.
+        See [#]_ for more information.
 
         Returns
         -------
         R : number, or array-like
             distributed resistance, in Ohm/m
 
-        '''
-        return self.Rs/(2.*pi)*(1./self.a + 1./self.b)
+        References
+        -------
+
+        .. [#] https://www.microwaves101.com/encyclopedias/a-more-exact-coax-attenuation-solution
+
+        """
+        rho = 1/self.sigma
+        delta = skin_depth(f=self.frequency.f, rho=rho, mu_r=1)
+        # Avoid infinites at DC
+        delta[delta > 1e6] = 1e6
+
+        Rin = rho / (2*pi*delta*self.a + 2*pi*delta**2*expm1(-self.a/delta))
+        # Outer shield is assumed to be much thicker than skin depth
+        Rout = rho / (2*pi*delta*self.b)
+        return Rin + Rout
 
     @property
-    def L(self):
-        '''
+    def L(self) -> NumberLike:
+        """
         Distributed inductance L, in H/m
 
         Returns
@@ -247,12 +273,12 @@ class Coaxial( DistributedCircuit,Media ):
         L : number, or array-like
             distributed inductance, in  H/m
 
-        '''
+        """
         return mu_0/(2.*pi)*log(self.b/self.a)
 
     @property
-    def C(self):
-        '''
+    def C(self) -> NumberLike:
+        """
         Distributed capacitance C, in F/m
 
         Returns
@@ -260,12 +286,12 @@ class Coaxial( DistributedCircuit,Media ):
         C : number, or array-like
             distributed capacitance, in F/m
 
-        '''
+        """
         return 2.*pi*self.epsilon_prime/log(self.b/self.a)
 
     @property
-    def G(self):
-        '''
+    def G(self) -> NumberLike:
+        """
         Distributed conductance G, in S/m
 
         Returns
@@ -273,7 +299,7 @@ class Coaxial( DistributedCircuit,Media ):
         G : number, or array-like
             distributed conductance, in S/m
 
-        '''
+        """
         f =  self.frequency.f
         return f*self.epsilon_second/log(self.b/self.a)
 
