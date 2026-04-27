@@ -18,6 +18,7 @@ API
     calibration/index
     calibration/deembedding
     vi/index
+    vi/vna
 
     vectorFitting
     qfactor
@@ -32,6 +33,3 @@ API
     data/index
     util
     io/index
-
-
-

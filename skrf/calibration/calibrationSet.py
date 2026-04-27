@@ -1,5 +1,3 @@
-
-
 """
 .. module:: skrf.calibration.calibrationSet
 ================================================================
@@ -18,10 +16,10 @@ CalibrationSet Class
    CalibrationSet
 
 """
-from itertools import product, combinations, permutations
-from .calibration import Calibration
-from ..networkSet import NetworkSet
+from itertools import product
 
+from ..networkSet import NetworkSet
+from .calibration import Calibration
 
 
 def cartesian_product(ideals, measured_sets, *args, **kwargs):
@@ -29,7 +27,7 @@ def cartesian_product(ideals, measured_sets, *args, **kwargs):
     """
     measured_lists = product(*[k[:] for k in measured_sets])
     return [Calibration(ideals = ideals, measured = measured,
-        *args, **kwargs) for measured in measured_lists ]
+        **kwargs) for measured in measured_lists ]
 
 def dot_product(ideals, measured_sets, *args, **kwargs):
     """
@@ -43,12 +41,12 @@ def dot_product(ideals, measured_sets, *args, **kwargs):
         measured = [measured_set[k] for measured_set in measured_sets]
         cal_list.append(
             Calibration(ideals=ideals, measured= measured,
-            *args,**kwargs)
+            **kwargs)
             )
 
     return cal_list
 
-class CalibrationSet(object):
+class CalibrationSet:
     """
     A set of Calibrations
 
@@ -57,7 +55,9 @@ class CalibrationSet(object):
     References
     -----------
 
-    .. [1] A. Arsenovic, L. Chen, M. F. Bauwens, H. Li, N. S. Barker, and R. M. Weikle, "An Experimental Technique for Calibration Uncertainty Analysis," IEEE Transactions on Microwave Theory and Techniques, vol. 61, no. 1, pp. 263-269, 2013.
+    .. [1] A. Arsenovic, L. Chen, M. F. Bauwens, H. Li, N. S. Barker, and R. M. Weikle,
+    "An Experimental Technique for Calibration Uncertainty Analysis,"
+    IEEE Transactions on Microwave Theory and Techniques, vol. 61, no. 1, pp. 263-269, 2013.
 
     """
 
@@ -105,10 +105,10 @@ class CalibrationSet(object):
         """
         """
         try:
-            [k.__getattribute__(prop).__getattribute__(func)\
+            [getattr(getattr(k, prop), func) \
                 (*args, **kwargs) for k in self.measured_sets]
         except (TypeError):
-            return [k.__getattribute__(prop).__getattribute__(func) \
+            return [getattr(getattr(k, prop), func) \
                 for k in self.measured_sets]
 
     def run(self):
@@ -138,8 +138,5 @@ class Dot(CalibrationSet):
         for k in range(len(measured_sets[0])):
             measured = [measured_set[k] for measured_set in measured_sets]
             cal = self.cal_class(ideals=ideals, measured= measured,
-                                 *args,**kwargs)
+                                 **kwargs)
             self.cal_list.append(cal)
-
-
-

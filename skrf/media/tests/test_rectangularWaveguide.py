@@ -1,8 +1,10 @@
-import unittest
 import os
+import unittest
+
+from skrf.constants import mil
 from skrf.media.rectangularWaveguide import RectangularWaveguide
 from skrf.network import Network
-from skrf.constants import mil
+
 
 class MediaTestCase(unittest.TestCase):
     """
@@ -29,9 +31,10 @@ class MediaTestCase(unittest.TestCase):
         qucs_ntwk = Network(fname)
         wg = RectangularWaveguide(
             frequency = qucs_ntwk.frequency,
-            a = 100*mil
+            a = 100*mil,
+            z0_override = 50.
             )
-        skrf_ntwk = wg.thru(Z0=50)**wg.line(200*mil,'m')**wg.thru(Z0=50)
+        skrf_ntwk = wg.line(200*mil,'m')
         self.assertEqual(qucs_ntwk, skrf_ntwk)
 
 
@@ -39,14 +42,14 @@ class MediaTestCase(unittest.TestCase):
     def test_conductor_loss(self):
         """
         This only compares the magnitude of the generated line, because
-        the loss approximation doesnt account for reactance of field on
+        the loss approximation doesn't account for reactance of field on
         sidewalls.
         """
         ntwk = Network(os.path.join(self.pwd, 'wr1p5_1in_swg_Al_0rough.s2p'))
         wg = RectangularWaveguide(
             frequency = ntwk.frequency,
             a=15*mil,
-            z0=50,
+            z0_override=50,
             rho = 1/(3.8e7),
             )
         self.assertTrue(
@@ -55,16 +58,16 @@ class MediaTestCase(unittest.TestCase):
     def test_roughness(self):
         """
         This only compares the magnitude of the generated line, because
-        the loss approximation doesnt account for reactance of field on
+        the loss approximation doesn't account for reactance of field on
         sidewalls.
         """
         ntwk = Network(os.path.join(self.pwd, 'wr1p5_1in_swg_Al_100nm_rough.s2p'))
         wg = RectangularWaveguide(
             ntwk.frequency,
             a=15*mil,
-            z0=50,
+            z0_override=50,
             rho = 1/(3.8e7),
             roughness = 100e-9,
             )
         self.assertTrue(
-            max(abs(wg.line(1,'in').s_mag[:,1,0] - ntwk.s_mag[:,1,0]))<1e-3 )
+            max(abs(wg.line(1,'in').s_mag[:,1,0] - ntwk.s_mag[:,1,0]))<1e-3)

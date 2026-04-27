@@ -50,20 +50,104 @@ General Purpose Objects
     HomoDict
 
 """
+from __future__ import annotations
+
+import collections
 import contextlib
 import fnmatch
 import os
-from typing import Iterable, Tuple, List, Union, Any
-import warnings
-import numpy as npy
-from datetime import datetime
-import collections
 import pprint
 import re
-from subprocess import Popen, PIPE
 import sys
+import warnings
+from collections.abc import Callable, Iterable
+from datetime import datetime
 from functools import wraps
-from .constants import Number, NumberLike
+from pathlib import Path
+from subprocess import PIPE, Popen
+from typing import Any, TypeVar
+
+import numpy as np
+
+from .constants import Number
+
+try:
+    import matplotlib.pyplot as plt
+    from matplotlib.axes import Axes
+    from matplotlib.figure import Figure
+except ImportError:
+    Figure = TypeVar("Figure")
+    Axes = TypeVar("Axes")
+    pass
+
+def plotting_available() -> bool:
+    return "matplotlib" in sys.modules
+
+def partial_with_docs(func, *args1, **kwargs1):
+    @wraps(func)
+    def method(self, *args2, **kwargs2):
+        return func(self, *args1, *args2, **kwargs1, **kwargs2)
+    return method
+
+def axes_kwarg(func):
+    """
+    This decorator checks if a :class:`matplotlib.axes.Axes` object is passed,
+    if not the current axis will be gathered through :func:`plt.gca`.
+
+    Raises
+    ------
+    RuntimeError
+        When trying to run the decorated function without matplotlib
+    """
+
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        ax = kwargs.pop('ax', None)
+        try:
+            if ax is None:
+                ax = plt.gca()
+        except NameError as err:
+            raise RuntimeError("Plotting is not available") from err
+        func(*args, ax=ax, **kwargs)
+
+    return wrapper
+
+def copy_doc(copy_func: Callable) -> Callable:
+    """Use Example: copy_doc(self.copy_func)(self.func) or used as deco"""
+    def wrapper(func: Callable) -> Callable:
+        func.__doc__ = copy_func.__doc__
+        return func
+    return wrapper
+
+def figure(*args, **kwargs) -> Figure:
+    """
+    Wraps the matplotlib figure call and raises if not available.
+
+    Raises
+    ------
+    RuntimeError
+        When trying to get subplots without matplotlib installed.
+    """
+
+    try:
+        return plt.figure(*args, **kwargs)
+    except NameError as err:
+        raise RuntimeError("Plotting is not available") from err
+
+def subplots(*args, **kwargs) -> tuple[Figure, np.ndarray]:
+    """
+    Wraps the matplotlib subplots call and raises if not available.
+
+    Raises
+    ------
+    RuntimeError
+        When trying to get subplots without matplotlib installed.
+    """
+
+    try:
+        return plt.subplots(*args, **kwargs)
+    except NameError as err:
+        raise RuntimeError("Plotting is not available") from err
 
 def now_string() -> str:
     """
@@ -76,7 +160,7 @@ def now_string() -> str:
     Returns
     -------
     now : string
-        curent date-time stamps.
+        current date-time stamps.
 
     See Also
     --------
@@ -108,13 +192,13 @@ def now_string_2_dt(s: str) -> datetime:
     return datetime(*[int(k) for k in s.split('.')])
 
 
-def find_nearest(array: npy.ndarray, value: Number) -> Number:
+def find_nearest(array: np.ndarray, value: Number) -> Number:
     """
     Find the nearest value in array.
 
     Parameters
     ----------
-    array :  npy.ndarray
+    array :  np.ndarray
         array we are searching for a value in
     value : element of the array
         value to search for
@@ -129,13 +213,13 @@ def find_nearest(array: npy.ndarray, value: Number) -> Number:
     return array[idx]
 
 
-def find_nearest_index(array: npy.ndarray, value: Number) -> int:
+def find_nearest_index(array: np.ndarray, value: Number) -> int:
     """
     Find the nearest index for a value in array.
 
     Parameters
     ----------
-    array :  npy.ndarray
+    array :  np.ndarray
         array we are searching for a value in
     value : element of the array
         value to search for
@@ -151,10 +235,10 @@ def find_nearest_index(array: npy.ndarray, value: Number) -> int:
     taken from  http://stackoverflow.com/questions/2566412/find-nearest-value-in-numpy-array
 
     """
-    return (npy.abs(array-value)).argmin()
+    return (np.abs(array-value)).argmin()
 
 
-def slice_domain(x: npy.ndarray, domain: tuple):
+def slice_domain(x: np.ndarray, domain: tuple):
     """
     Returns a slice object closest to the `domain` of `x`
 
@@ -162,7 +246,7 @@ def slice_domain(x: npy.ndarray, domain: tuple):
 
     Parameters
     ----------
-    vector : npy.ndarray
+    vector : np.ndarray
         an array of values
     domain : tuple
         tuple of (start,stop) values defining the domain over
@@ -191,7 +275,7 @@ def get_fid(file, *args, **kwargs):
 
     Parameters
     ----------
-    file : str/unicode or file-object
+    file : str/unicode, Path, or file-object
         file to open
     \*args, \*\*kwargs : arguments and keyword arguments to `open()`
 
@@ -200,13 +284,13 @@ def get_fid(file, *args, **kwargs):
     fid : file object
 
     """
-    if isinstance(file, str):
+    if isinstance(file, (str, Path)):
         return open(file, *args, **kwargs)
     else:
         return file
 
 
-def get_extn(filename: str) -> str:
+def get_extn(filename: str | Path) -> str:
     """
     Get the extension from a filename.
 
@@ -215,7 +299,7 @@ def get_extn(filename: str) -> str:
 
     Parameters
     ----------
-    filename : string
+    filename : string or Path
         the filename
 
     Returns
@@ -225,6 +309,10 @@ def get_extn(filename: str) -> str:
         isn't one
 
     """
+
+    if isinstance(filename, Path):
+        return filename.suffix.strip('.') or None
+
     ext = os.path.splitext(filename)[-1]
     if len(ext) == 0:
         return None
@@ -266,6 +354,7 @@ def git_version(modname: str) -> str:
         output of 'git describe'
 
     """
+    warnings.warn("git_version is deprecated and will be removed in a future version.", FutureWarning, stacklevel=2)
     mod = __import__(modname)
     mod_dir = os.path.split(mod.__file__)[0]
     p = Popen(['git', 'describe'], stdout=PIPE, stderr=PIPE, cwd=mod_dir)
@@ -281,7 +370,7 @@ def git_version(modname: str) -> str:
     return out
 
 
-def dict_2_recarray(d: dict, delim: str, dtype: List[Tuple]) -> npy.ndarray:
+def dict_2_recarray(d: dict, delim: str, dtype: list[tuple]) -> np.ndarray:
     """
     Turn a dictionary of structured keys to a record array of objects.
 
@@ -291,7 +380,7 @@ def dict_2_recarray(d: dict, delim: str, dtype: List[Tuple]) -> npy.ndarray:
     Parameters
     ----------
     d : dict
-        dictionnary of structured keys
+        dictionary of structured keys
     delim : str
         delimiter string
     dtype : list of tuple
@@ -324,9 +413,9 @@ def dict_2_recarray(d: dict, delim: str, dtype: List[Tuple]) -> npy.ndarray:
            1-Port Network: 'b1,0.0,3.0',  450-800 GHz, 101 pts, z0=[ 50.+0.j],
            1-Port Network: 'a1,0.0,-3.0',  450-800 GHz, 101 pts, z0=[ 50.+0.j],
     """
-
+    warnings.warn("dict_2_recarray is deprecated and will be removed in a future version.", FutureWarning, stacklevel=2)
     split_keys = [tuple(k.split(delim)+[d[k]]) for k in d.keys()]
-    x = npy.array(split_keys, dtype=dtype+[('values',object)])
+    x = np.array(split_keys, dtype=dtype+[('values',object)])
     return x
 
 
@@ -355,7 +444,8 @@ def findReplace(directory: str, find: str, replace: str, file_pattern: str):
     ----------
     .. [1] http://stackoverflow.com/questions/4205854/python-way-to-recursively-find-and-replace-string-in-text-files
     """
-    for path, dirs, files in os.walk(os.path.abspath(directory)):
+    warnings.warn("findReplace is deprecated and will be removed in a future version.", FutureWarning, stacklevel=2)
+    for path, _dirs, files in os.walk(os.path.abspath(directory)):
         for filename in fnmatch.filter(files, file_pattern):
             filepath = os.path.join(path, filename)
             with open(filepath) as f:
@@ -410,6 +500,7 @@ class HomoList(collections.abc.Sequence):
 
 
     def __init__(self, list_):
+        warnings.warn("HomoList is deprecated and will be removed in a future version.", FutureWarning, stacklevel=2)
         self.store = list(list_)
 
     def __eq__(self, value):
@@ -505,6 +596,7 @@ class HomoDict(collections.abc.MutableMapping):
     >>> h[h.prop==value].func()
     """
     def __init__(self, dict_):
+        warnings.warn("HomoDict is deprecated and will be removed in a future version.", FutureWarning, stacklevel=2)
         self.store = dict(dict_)
 
     def __eq__(self, value):
@@ -599,7 +691,7 @@ class HomoDict(collections.abc.MutableMapping):
         return a
 
 
-def has_duplicate_value(value: Any, values: Iterable, index: int) -> Union[bool, int]:
+def has_duplicate_value(value: Any, values: Iterable, index: int) -> bool | int:
     """
     Check if there is another value of the current index in the list.
 
@@ -624,6 +716,8 @@ def has_duplicate_value(value: Any, values: Iterable, index: int) -> Union[bool,
     >>> rf.has_duplicate_value(3, [1, 2, 0, 3, 0], 0)  # -> 3
     >>> rf.has_duplicate_value(3, [1, 2, 0, 3, 0], 3)  # -> False
     """
+    warnings.warn("has_duplicate_value is deprecated and will be removed in a future version.",
+                  FutureWarning, stacklevel=2)
 
     for i, val in enumerate(values):
         if i == index:
@@ -662,13 +756,13 @@ def unique_name(name: str, names: list, exclude: int = -1) -> str:
             suffix = 1
 
         for num in range(suffix, 100, 1):
-            name = "{:s}_{:02d}".format(name_base, num)
-            if has_duplicate_value(name, names, exclude) is False:
+            name = f"{name_base:s}_{num:02d}"
+            if not has_duplicate_value(name, names, exclude):
                 break
     return name
 
 
-def smooth(x: npy.ndarray, window_len: int = 11, window: str = 'flat') -> npy.ndarray:
+def smooth(x: np.ndarray, window_len: int = 11, window: str = 'flat') -> np.ndarray:
     """
     Smooth the data using a window with requested size.
 
@@ -729,12 +823,12 @@ def smooth(x: npy.ndarray, window_len: int = 11, window: str = 'flat') -> npy.nd
     if window not in ['flat', 'hanning', 'hamming', 'bartlett', 'blackman']:
         raise ValueError("Window is one of 'flat', 'hanning', 'hamming', 'bartlett', 'blackman'")
 
-    s = npy.r_[x[window_len - 1:0:-1], x, x[-2:-window_len - 1:-1]]
+    s = np.r_[x[window_len - 1:0:-1], x, x[-2:-window_len - 1:-1]]
     if window == 'flat':  # moving average
-        w = npy.ones(window_len, 'd')
+        w = np.ones(window_len, 'd')
     else:
-        w = eval('npy.' + window + '(window_len)')
-    y = npy.convolve(w / w.sum(), s, mode='same')
+        w = eval('np.' + window + '(window_len)')
+    y = np.convolve(w / w.sum(), s, mode='same')
     return y[window_len-1:-(window_len-1)]
 
 
@@ -765,6 +859,8 @@ class ProgressBar:
         label : str, optional
             Progress bar label, by default "iterations"
         """
+
+        warnings.warn("ProgressBar is deprecated and will be removed in a future version.", FutureWarning, stacklevel=2)
         self.iterations = iterations
         self.label = label
         self.prog_bar = '[]'
@@ -781,7 +877,7 @@ class ProgressBar:
         iteration : int
             current iteration
         """
-        print('\r', self, end='')
+        print('\r', self, end='')  # noqa: T201
         sys.stdout.flush()
         self.update_iteration(iteration + 1)
 
@@ -805,22 +901,18 @@ class ProgressBar:
 
 @contextlib.contextmanager
 def suppress_numpy_warnings(**kw):
-    olderr = npy.seterr(**kw)
+    olderr = np.seterr(**kw)
     yield
-    npy.seterr(**olderr)
+    np.seterr(**olderr)
 
 
 def suppress_warning_decorator(msg):
     def suppress_warnings_decorated(func):
         @wraps(func)
         def suppressed_func(*k, **kw):
-            show_warnings = []
-            with warnings.catch_warnings(record=True) as wlist:
-                 res = func(*k, **kw)
-                 for w in wlist:
-                     if not w.message.args[0].startswith(msg):
-                         show_warnings.append(w)
-            for w in show_warnings:
-                warnings.warn(w.message.args[0])
+            with warnings.catch_warnings():
+                warnings.filterwarnings("ignore", message=f"{msg}.*")
+                res = func(*k, **kw)
+            return res
         return suppressed_func
     return suppress_warnings_decorated

@@ -62,40 +62,50 @@ JSON
 
 
 """
+from __future__ import annotations
+
 import glob
 import inspect
 import json
 import os
 import pickle
-from pickle import UnpicklingError
 import sys
 import warnings
+from io import StringIO
+from logging import getLogger
+from pathlib import Path
+from pickle import UnpicklingError
+from typing import Any
 
-import numpy as npy
+import numpy as np
+from pandas import DataFrame, ExcelWriter, Series
 
-from ..util import get_extn, get_fid
-from ..network import Network
 from ..frequency import Frequency
-from ..media import Media
+from ..network import Network
 from ..networkSet import NetworkSet
-from ..calibration.calibration import Calibration
+from ..util import get_extn, get_fid
 
-from copy import copy
-dir_ = copy(dir)
+logger = getLogger(__name__)
 
-# delayed import: from pandas import DataFrame, Series for ntwk_2_spreadsheet
 
-# file extension conventions for skrf objects.
-global OBJ_EXTN
-OBJ_EXTN = [
-    [Frequency, 'freq'],
-    [Network, 'ntwk'],
-    [NetworkSet, 'ns'],
-    [Calibration, 'cal'],
-    [Media, 'med'],
-    [object, 'p'],
+def _get_extension(inst: Any) -> str:
+    """File extension conventions for skrf objects.
+    """
+    from ..calibration.calibration import Calibration
+    from ..media import Media
+
+    extensions = [
+        (Frequency, "freq"),
+        (Network, "ntwk"),
+        (NetworkSet, "ns"),
+        (Calibration, "cal"),
+        (Media, "med"),
     ]
 
+    for cls, ext in extensions:
+        if isinstance(inst, cls):
+            return ext
+    return "p"
 
 def read(file, *args, **kwargs):
     r"""
@@ -106,7 +116,7 @@ def read(file, *args, **kwargs):
 
     Parameters
     ----------
-    file : str or file-object
+    file : str, Path, or file-object
         name of file, or  a file-object
     \*args, \*\*kwargs : arguments and keyword arguments
         passed through to pickle.load
@@ -117,7 +127,7 @@ def read(file, *args, **kwargs):
 
         * a file-object, it is left open
 
-        * a filename, then a file-object is opened and closed. 
+        * a filename, then a file-object is opened and closed.
 
         * a file-object and reading fails, then the position is reset back to 0 using seek if possible.
 
@@ -138,7 +148,7 @@ def read(file, *args, **kwargs):
     fid = get_fid(file, mode='rb')
     try:
         obj = pickle.load(fid, *args, **kwargs)
-    except (UnpicklingError, UnicodeDecodeError) as e:
+    except (UnpicklingError, UnicodeDecodeError):
         # if fid is seekable then reset to beginning of file
         fid.seek(0)
 
@@ -167,7 +177,7 @@ def write(file, obj, overwrite = True):
 
     Parameters
     ----------
-    file : file or string
+    file : file, Path, or string
         File or filename to which the data is saved.  If file is a
         file-object, then the filename is unchanged.  If file is a
         string, an appropriate extension will be appended to the file
@@ -181,7 +191,7 @@ def write(file, obj, overwrite = True):
 
 
     .. note::
-        If `file` is a string, but doesnt contain a suffix, one is chosen
+        If `file` is a string, but doesn't contain a suffix, one is chosen
         automatically. Here are the extensions:
 
 
@@ -230,15 +240,11 @@ def write(file, obj, overwrite = True):
         extn = get_extn(file)
         if extn is None:
             # if there is not extension add one
-            for obj_extn in OBJ_EXTN:
-                if isinstance(obj, obj_extn[0]):
-                    extn = obj_extn[1]
-                    break
-            file = file + '.' + extn
+            file += f".{_get_extension(obj)}"
 
         if os.path.exists(file):
             if not overwrite:
-                warnings.warn('file exists, and overwrite option is False. Not writing.')
+                warnings.warn('file exists, and overwrite option is False. Not writing.', stacklevel=2)
                 return
 
         with open(file, 'wb') as fid:
@@ -249,7 +255,8 @@ def write(file, obj, overwrite = True):
         pickle.dump(obj, fid, protocol=2)
         fid.close()
 
-def read_all(dir: str ='.', contains = None, f_unit = None, obj_type=None, files: list=None, recursive=False) -> dict:
+def read_all(dir: str | Path = '.', sort = True, contains = None, f_unit = None,
+        obj_type=None, files: list=None, recursive=False) -> dict:
     """
     Read all skrf objects in a directory.
 
@@ -259,8 +266,10 @@ def read_all(dir: str ='.', contains = None, f_unit = None, obj_type=None, files
 
     Parameters
     ----------
-    dir : str, optional
+    dir : str or Path, optional
         the directory to load from, default  \'.\'
+    sort: boolean, default is True
+        filenames sorted by https://docs.python.org/3/library/stdtypes.html#list.sort without arguments
     contains : str, optional
         if not None, only files containing this substring will be loaded
     f_unit : ['hz','khz','mhz','ghz','thz']
@@ -306,6 +315,9 @@ def read_all(dir: str ='.', contains = None, f_unit = None, obj_type=None, files
     write_all : write dictionary of skrf objects to a directory
     """
 
+    # Convert a Path object to a string
+    dir = str(dir.resolve()) if isinstance(dir, Path) else dir
+
     out={}
 
     filelist = []
@@ -319,6 +331,9 @@ def read_all(dir: str ='.', contains = None, f_unit = None, obj_type=None, files
     else:
         filelist.extend(files)
 
+    if sort is True:
+        filelist.sort()
+
     for filename in filelist:
         if contains is not None and contains not in filename:
             continue
@@ -327,25 +342,25 @@ def read_all(dir: str ='.', contains = None, f_unit = None, obj_type=None, files
         try:
             out[keyname] = read(fullname)
             continue
-        except:
+        except Exception:
             pass
 
         try:
             out[keyname] = Network(fullname)
             continue
-        except:
+        except Exception:
             pass
 
     if f_unit is not None:
         for keyname in out:
             try:
                 out[keyname].frequency.unit = f_unit
-            except:
+            except Exception:
                 pass
 
     if obj_type is not None:
-        out = dict([(k, out[k]) for k in out if
-            isinstance(out[k],sys.modules[__name__].__dict__[obj_type])])
+        out = {k: out[k] for k in out if
+            isinstance(out[k],sys.modules[__name__].__dict__[obj_type])}
 
     return out
 
@@ -362,8 +377,6 @@ def read_all_networks(*args, **kwargs):
     --------
     read_all
     """
-    if 'f_unit' not in kwargs:
-        kwargs.update({'f_unit':'ghz'})
     return read_all(*args,obj_type='Network', **kwargs)
 
 ran = read_all_networks
@@ -410,7 +423,8 @@ def write_all(dict_objs, dir='.', *args, **kwargs):
 
     """
     if not os.path.exists('.'):
-        raise OSError('No such directory: %s'%dir)
+        raise OSError(f'No such directory: {dir}')
+
 
 
     for k in dict_objs:
@@ -420,17 +434,13 @@ def write_all(dict_objs, dir='.', *args, **kwargs):
         extn = get_extn(filename)
         if extn is None:
             # if there is not extension add one
-            for obj_extn in OBJ_EXTN:
-                if isinstance(obj, obj_extn[0]):
-                    extn = obj_extn[1]
-                    break
-            filename = filename + '.' + extn
+            filename += f".{_get_extension(obj)}"
         try:
             with open(os.path.join(dir+'/', filename), 'wb') as fid:
                 write(fid, obj,*args, **kwargs)
         except Exception as inst:
-            print(inst)
-            warnings.warn('couldnt write %s: %s'%(k,str(inst)))
+            logger.warning(f'couldnt write {k}: {inst}')
+            warnings.warn(f'couldnt write {k}: {inst}', stacklevel=2)
 
             pass
 
@@ -470,7 +480,7 @@ def save_sesh(dict_objs, file='skrfSesh.p', module='skrf', exclude_prefix='_'):
 
     """
     objects = {}
-    print('pickling: ')
+    logger.debug('pickling: ')
     for k in dict_objs:
         try:
             if module  in inspect.getmodule(dict_objs[k]).__name__:
@@ -478,14 +488,14 @@ def save_sesh(dict_objs, file='skrfSesh.p', module='skrf', exclude_prefix='_'):
                     pickle.dumps(dict_objs[k])
                     if k[0] != '_':
                         objects[k] = dict_objs[k]
-                        print(k+', ')
+                        logger.debug(k+', ')
                 finally:
                     pass
 
         except(AttributeError, TypeError):
             pass
     if len (objects ) == 0:
-        print('nothing')
+        logger.debug('nothing')
 
     write(file, objects)
 
@@ -495,7 +505,7 @@ def load_all_touchstones(dir = '.', contains=None, f_unit=None):
 
     Notes
     -------
-    Alternatively you can use the :func:`read_all` function.
+
 
     Parameters
     -----------
@@ -525,14 +535,14 @@ def load_all_touchstones(dir = '.', contains=None, f_unit=None):
     for f in os.listdir (dir):
         if contains is not None and contains not in f:
             continue
-        fullname = os.path.join(dir,f)
         keyname,extn = os.path.splitext(f)
         extn = extn.lower()
         try:
             if extn[1]== 's' and extn[-1]=='p':
                 ntwkDict[keyname]=(Network(dir +'/'+f))
-                if f_unit is not None: ntwkDict[keyname].frequency.unit=f_unit
-        except:
+                if f_unit is not None:
+                    ntwkDict[keyname].frequency.unit=f_unit
+        except Exception:
             pass
     return ntwkDict
 
@@ -552,7 +562,7 @@ def write_dict_of_networks(ntwkDict, dir='.'):
 
 
     """
-    warnings.warn('Deprecated. use write_all.', DeprecationWarning)
+    warnings.warn('Deprecated. use write_all.', DeprecationWarning, stacklevel=2)
     for ntwkKey in ntwkDict:
         ntwkDict[ntwkKey].write_touchstone(filename = dir+'/'+ntwkKey)
 
@@ -577,20 +587,19 @@ def read_csv(filename):
 
     ntwk = Network(name=filename[:-4])
     try:
-        data = npy.loadtxt(filename, skiprows=3,delimiter=',',\
+        data = np.loadtxt(filename, skiprows=3,delimiter=',',\
                 usecols=range(9))
         s11 = data[:,1] +1j*data[:,2]
         s21 = data[:,3] +1j*data[:,4]
         s12 = data[:,5] +1j*data[:,6]
         s22 = data[:,7] +1j*data[:,8]
-        ntwk.s = npy.array([[s11, s21],[s12,s22]]).transpose().reshape(-1,2,2)
+        ntwk.s = np.array([[s11, s21],[s12,s22]]).transpose().reshape(-1,2,2)
     except(IndexError):
-        data = npy.loadtxt(filename, skiprows=3,delimiter=',',\
+        data = np.loadtxt(filename, skiprows=3,delimiter=',',\
                 usecols=range(3))
         ntwk.s = data[:,1] +1j*data[:,2]
 
     ntwk.frequency.f = data[:,0]
-    ntwk.frequency.unit='ghz'
 
     return ntwk
 
@@ -614,21 +623,21 @@ def statistical_2_touchstone(file_name, new_file_name=None,\
             touchstone header written to first beginning of file
 
     """
-    if new_file_name is None:
+    remove_tmp_file = new_file_name is None
+    if remove_tmp_file:
         new_file_name = 'tmp-'+file_name
-        remove_tmp_file = True
 
     # This breaks compatibility with python 2.6 and older
-    with open(file_name, 'r') as old_file, open(new_file_name, 'w') as new_file:
-        new_file.write('%s\n'%header_string)
+    with open(file_name) as old_file, open(new_file_name, 'w') as new_file:
+        new_file.write(f'{header_string}\n')
         for line in old_file:
             new_file.write(line)
 
-    if remove_tmp_file is True:
+    if remove_tmp_file:
         os.rename(new_file_name,file_name)
 
-def network_2_spreadsheet(ntwk, file_name =None, file_type= 'excel', form='db',
-    *args, **kwargs):
+def network_2_spreadsheet(ntwk: Network, file_name: str | Path = None,
+        file_type: str = 'excel', form: str ='db', *args, **kwargs):
     r"""
     Write a Network object to a spreadsheet, for your boss.
 
@@ -648,7 +657,7 @@ def network_2_spreadsheet(ntwk, file_name =None, file_type= 'excel', form='db',
     ----------
     ntwk :  :class:`~skrf.network.Network` object
         the network to write
-    file_name : str, None
+    file_name : str, Path or None
         the file_name to write. if None,  ntwk.name is used.
     file_type : ['csv','excel','html']
         the type of file to write. See `pandas.DataFrame.to_???` functions.
@@ -665,7 +674,6 @@ def network_2_spreadsheet(ntwk, file_name =None, file_type= 'excel', form='db',
     --------
     networkset_2_spreadsheet : writes a spreadsheet for many networks
     """
-    from pandas import DataFrame, Series # delayed because its not a requirement
     file_extns = {'csv':'csv','excel':'xls','html':'html'}
 
     form = form.lower()
@@ -684,32 +692,33 @@ def network_2_spreadsheet(ntwk, file_name =None, file_type= 'excel', form='db',
         file_name = ntwk.name + '.'+file_extns[file_type]
 
     d = {}
-    index =ntwk.frequency.f_scaled
+    index = ntwk.frequency.f_scaled
 
     if form =='db':
         for m,n in ntwk.port_tuples:
-            d['S%i%i Log Mag(dB)'%(m+1,n+1)] = \
+            d[f'S{ntwk._fmt_trace_name(m,n)} Log Mag(dB)'] = \
                 Series(ntwk.s_db[:,m,n], index = index)
-            d[u'S%i%i Phase(deg)'%(m+1,n+1)] = \
+            d[f'S{ntwk._fmt_trace_name(m,n)} Phase(deg)'] = \
                 Series(ntwk.s_deg[:,m,n], index = index)
     elif form =='ma':
         for m,n in ntwk.port_tuples:
-            d['S%i%i Mag(lin)'%(m+1,n+1)] = \
+            d[f'S{ntwk._fmt_trace_name(m,n)} Mag(lin)'] = \
                 Series(ntwk.s_mag[:,m,n], index = index)
-            d[u'S%i%i Phase(deg)'%(m+1,n+1)] = \
+            d[f'S{ntwk._fmt_trace_name(m,n)} Phase(deg)'] = \
                 Series(ntwk.s_deg[:,m,n], index = index)
     elif form =='ri':
         for m,n in ntwk.port_tuples:
-            d['S%i%i Real'%(m+1,n+1)] = \
+            d[f'S{ntwk._fmt_trace_name(m,n)} Real'] = \
                 Series(ntwk.s_re[:,m,n], index = index)
-            d[u'S%i%i Imag'%(m+1,n+1)] = \
+            d[f'S{ntwk._fmt_trace_name(m,n)} Imag'] = \
                 Series(ntwk.s_im[:,m,n], index = index)
 
     df = DataFrame(d)
-    df.__getattribute__('to_%s'%file_type)(file_name,
-        index_label='Freq(%s)'%ntwk.frequency.unit, *args, **kwargs)
+    df.__getattribute__(f'to_{file_type}')(file_name,
+        index_label=f'Freq({ntwk.frequency.unit})', **kwargs)
 
-def network_2_dataframe(ntwk, attrs=['s_db'], ports = None):
+def network_2_dataframe(ntwk: Network, attrs: list[str] =None,
+        ports: list[tuple[int, int]] = None, port_sep: str | None = None):
     """
     Convert one or more attributes of a network to a pandas DataFrame.
 
@@ -721,27 +730,33 @@ def network_2_dataframe(ntwk, attrs=['s_db'], ports = None):
         like ['s_db','s_deg']
     ports : list of tuples
         list of port pairs to write. defaults to ntwk.port_tuples
-        (like [[0,0]])
+        (like [(0,0)])
+    port_sep : string
+        defaults to None, which means a empty string "" is used for
+        networks with lower than 10 ports. (s_db 11, s_db 21)
+        For more than ten ports a "_" is used to avoid ambiguity.
+        (s_db 1_1, s_db 2_1)
 
     Returns
     -------
     df : pandas DataFrame Object
     """
-    from pandas import DataFrame, Series # delayed because its not a requirement
-    d = {}
-    index =ntwk.frequency.f_scaled
-
+    if attrs is None:
+        attrs = ["s_db"]
     if ports is None:
         ports = ntwk.port_tuples
 
+    if port_sep is None:
+        port_sep = "_" if ntwk.nports > 10 else ""
+
+    d = {}
     for attr in attrs:
-        for m,n in ports:
-            d['%s %i%i'%(attr, m+1,n+1)] = \
-                Series(ntwk.__getattribute__(attr)[:,m,n], index = index)
+        attr_array = getattr(ntwk, attr)
+        for m, n in ports:
+            d[f'{attr} {m+1}{port_sep}{n+1}'] = attr_array[:, m, n]
+    return DataFrame(d, index=ntwk.frequency.f)
 
-    return DataFrame(d)
-
-def networkset_2_spreadsheet(ntwkset: 'NetworkSet', file_name: str = None, file_type: str = 'excel',
+def networkset_2_spreadsheet(ntwkset: NetworkSet, file_name: str = None, file_type: str = 'excel',
     *args, **kwargs):
     r"""
     Write a NetworkSet object to a spreadsheet, for your boss.
@@ -780,7 +795,6 @@ def networkset_2_spreadsheet(ntwkset: 'NetworkSet', file_name: str = None, file_
     --------
     networkset_2_spreadsheet : writes a spreadsheet for many networks
     """
-    from pandas import DataFrame, Series, ExcelWriter # delayed because its not a requirement
     if ntwkset.name is None and file_name is None:
         raise(ValueError('Either ntwkset must have name or give a file_name'))
     if file_name is None:
@@ -790,26 +804,13 @@ def networkset_2_spreadsheet(ntwkset: 'NetworkSet', file_name: str = None, file_
         # add file extension if missing
         if not file_name.endswith('.xlsx'):
             file_name += '.xlsx'
-        writer = ExcelWriter(file_name)
-        [network_2_spreadsheet(k, writer, sheet_name=k.name, *args, **kwargs) for k in ntwkset]
-        writer.save()
+        with ExcelWriter(file_name) as writer:
+            [network_2_spreadsheet(k, writer, sheet_name=k.name, **kwargs) for k in ntwkset]
     else:
         [network_2_spreadsheet(k,*args, **kwargs) for k in ntwkset]
 
 
-# Provide a StringBuffer that let's me work with Python2 strings and Python3 unicode strings without thinking
-if sys.version_info < (3, 0):
-    import StringIO
-
-    class StringBuffer(StringIO.StringIO):
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *args):
-            self.close()
-else:
-    from io import StringIO
-    StringBuffer = StringIO
+StringBuffer = StringIO
 
 
 class TouchstoneEncoder(json.JSONEncoder):
@@ -819,10 +820,10 @@ class TouchstoneEncoder(json.JSONEncoder):
     and breaking down frequency objects into dicts.
     """
     def default(self, obj):
-        if isinstance(obj, npy.ndarray):
+        if isinstance(obj, np.ndarray):
             return obj.tolist()
         if isinstance(obj, complex):
-            return npy.real(obj), npy.imag(obj)  # split into [real, im]
+            return np.real(obj), np.imag(obj)  # split into [real, im]
         if isinstance(obj, Frequency):
             return {'flist': obj.f_scaled.tolist(), 'funit': obj.unit}
         return json.JSONEncoder.default(self, obj)
@@ -830,11 +831,19 @@ class TouchstoneEncoder(json.JSONEncoder):
 
 def to_json_string(network):
     """
-    Dumps Network to JSON string. Faster than converting and saving as touchstone.
+    Dumps Network to JSON string.
+
+    Faster than converting and saving as touchstone.
     Safer than pickling (no arbitrary code execution on load).
-    :param network: :class:`~skrf.network.Network` object
+
+    Parameters
+    ----------
+    network: :class:`~skrf.network.Network` object
         A Network object to be serialized and returned as a JSON string.
-    :return: str
+
+    Returns
+    -------
+    json : str
         JSON string representation of a network object.
     """
     return json.dumps(network.__dict__, cls=TouchstoneEncoder)
@@ -843,9 +852,15 @@ def to_json_string(network):
 def from_json_string(obj_string):
     """
     Loads network object from JSON string representation.
-    :param obj_string: str
+
+    Parameters
+    ----------
+    obj_string : str
         JSON string representation of a network object.
-    :return: :class:`~skrf.network.Network` object
+
+    Returns
+    -------
+    ntwk : :class:`~skrf.network.Network` object
         A Network object, rebuilt from JSON.
     """
     obj = json.loads(obj_string)
@@ -854,8 +869,8 @@ def from_json_string(obj_string):
     ntwk.name = obj['name']
     ntwk.comments = obj['comments']
     ntwk.port_names = obj['port_names']
-    ntwk.z0 = npy.array(obj['_z0'])[..., 0] + npy.array(obj['_z0'])[..., 1] * 1j  # recreate complex numbers
-    ntwk.s = npy.array(obj['_s'])[..., 0] + npy.array(obj['_s'])[..., 1] * 1j
-    ntwk.frequency = Frequency.from_f(npy.array(obj['_frequency']['flist']),
+    ntwk.z0 = np.array(obj['_z0'])[..., 0] + np.array(obj['_z0'])[..., 1] * 1j  # recreate complex numbers
+    ntwk.s = np.array(obj['_s'])[..., 0] + np.array(obj['_s'])[..., 1] * 1j
+    ntwk.frequency = Frequency.from_f(np.array(obj['_frequency']['flist']),
                                          unit=obj['_frequency']['funit'])
     return ntwk

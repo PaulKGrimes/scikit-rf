@@ -5,15 +5,15 @@
 # -- Project information -----------------------------------------------------
 
 project = 'scikit-rf'
-copyright = '2022, scikit-rf team'
+copyright = '2025, scikit-rf team'
 author = 'scikit-rf team'
 
 # -- General configuration ---------------------------------------------------
 
-import sys, os
-import sphinx_rtd_theme
-import nbsphinx
+import os
+import sys
 import warnings
+
 warnings.filterwarnings('ignore')
 
 # If extensions (or modules to document with autodoc) are in another directory,
@@ -21,7 +21,8 @@ warnings.filterwarnings('ignore')
 # documentation root, use os.path.abspath to make it absolute, like shown here.
 sys.path.insert(0, os.path.abspath('../../'))
 
-import skrf as rf 
+import skrf as rf
+
 rf.setup_pylab()
 
 # Add any Sphinx extension module names here, as strings. They can be
@@ -34,11 +35,13 @@ sys.path.insert(0, os.path.abspath('../sphinxext'))
 
 extensions = [
     'sphinx.ext.autodoc',
+    'sphinx.ext.autosectionlabel',
     'sphinx.ext.autosummary',
     'sphinx.ext.napoleon',
     'sphinx.ext.mathjax',
     'sphinx.ext.viewcode',
     'sphinx.ext.intersphinx',
+    'sphinx_rtd_theme',
     'nbsphinx',
     #'inheritance_diagram',
     'IPython.sphinxext.ipython_directive',
@@ -63,7 +66,7 @@ nbsphinx_execute = 'always'
 nbsphinx_allow_errors = True
 nbsphinx_kernel_name = 'python'
 numpydoc_show_class_members = False
-nbsphinx_timeout = 120
+nbsphinx_timeout = 180
 
 # Autodoc settings
 autodoc_typehints = "description"
@@ -82,20 +85,6 @@ master_doc = 'index'
 # This pattern also affects html_static_path and html_extra_path.
 exclude_patterns = ['_build', 'Thumbs.db', '.DS_Store', "**/*.rst.rst", '**.ipynb_checkpoints']
 
-# The version info for the project you're documenting, acts as replacement for
-# |version| and |release|, also used in various other places throughout the
-# built documents.
-#
-# The short X.Y version.
-"""
-setup_lines = open('../../setup.py').readlines()
-version = VERSION#'vUndefined'
-for l in setup_lines:
-    if l.startswith('VERSION'):
-        version = l.split("'")[1]
-        break
-"""
-
 # The name of the Pygments (syntax highlighting) style to use.
 pygments_style = 'sphinx'
 
@@ -109,11 +98,10 @@ pygments_style = 'sphinx'
 # further.  For a list of options available for each theme, see the
 # documentation.
 
-# Add any paths that contain custom themes here, relative to this directory.
-
 html_theme = "sphinx_rtd_theme"
 
-html_theme_path = [sphinx_rtd_theme.get_html_theme_path()]
+# Add any paths that contain custom themes here, relative to this directory.
+# html_theme_path = []
 
 # The name for this set of Sphinx documents.  If None, it defaults to
 # "<project> v<release> documentation".
@@ -193,8 +181,20 @@ man_pages = [
 
 # Example configuration for intersphinx: refer to the Python standard library.
 intersphinx_mapping = {
-    'python': ('http://docs.python.org/3', None),
+    'python': ('https://docs.python.org/3', None),
     'numpy': ('https://numpy.org/doc/stable', None),
     'pd': ('https://pandas.pydata.org/docs', None),
     'scipy': ('https://docs.scipy.org/doc/scipy/', None),
 }
+
+def process_signature(app, what, name, obj, options, signature, return_annotation):
+
+    func_name = name.split(".")[-1]
+    if func_name.startswith("plot_") and func_name[5:] in rf.Network._generated_functions().keys():
+        signature = signature.split(",")[2:]
+        return "(" + ", ".join(signature), return_annotation
+
+    return signature, return_annotation
+
+def setup(app):
+    app.connect("autodoc-process-signature", process_signature)

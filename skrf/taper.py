@@ -24,21 +24,23 @@ References
     Klopfenstein
 
 """
+from __future__ import annotations
 
+from collections.abc import Callable
 from numbers import Number
-from typing import Callable, List
-from . network import cascade_list
-from scipy  import linspace
-from numpy import exp, log
+
+from numpy import exp, linspace, log
+
+from .network import cascade_list
 
 
-class Taper1D(object):
+class Taper1D:
     """
     Generic 1D Taper Object
     """
     def __init__(self, med, start: Number, stop: Number, n_sections: int, f: Callable,
                  length: Number, length_unit: str = 'm', param: str = 'z0', f_is_normed: bool = True,
-                 med_kw: dict = {}, f_kw: dict = {}):
+                 med_kw: dict = None, f_kw: dict = None):
         """
         Generic 1D Taper Constructor.
 
@@ -103,6 +105,10 @@ class Taper1D(object):
                             f_is_normed=True,
                             med_kw={'frequency':Frequency(75,110,101,'ghz')})
         """
+        if f_kw is None:
+            f_kw = {}
+        if med_kw is None:
+            med_kw = {}
         self.med = med
         self.param = param
         self.start = start
@@ -122,7 +128,7 @@ class Taper1D(object):
         # it makes for a intuitive operation
         if param == 'z0':
             if hasattr(self.med, 'from_z0'):
-                self.med = getattr(self.med, 'from_z0')
+                self.med = self.med.from_z0
 
     def __str__(self) -> str:
         return 'Taper: {classname}: {param} from {start}-{stop}'
@@ -141,7 +147,7 @@ class Taper1D(object):
 
     @property
     def value_vector(self):
-        if self.f_is_normed ==True:
+        if self.f_is_normed:
             x = linspace(0,1,self.n_sections)
             y = self.f(x, **self.f_kw)*(self.stop-self.start) + self.start
         else:
@@ -186,7 +192,7 @@ class Taper1D(object):
                                        unit=self.length_unit)
 
     @property
-    def medias(self) -> List:
+    def medias(self) -> list:
         """
         List of medias.
 
@@ -197,7 +203,7 @@ class Taper1D(object):
         return [self.media_at(k) for k in self.value_vector]
 
     @property
-    def sections(self) -> List:
+    def sections(self) -> list:
         """
         List of sections.
 
@@ -230,7 +236,7 @@ class Linear(Taper1D):
     def __init__(self, **kw):
         opts = dict(f=lambda x:x, f_is_normed=True)
         kw.update(opts)
-        super(Linear, self).__init__(**kw)
+        super().__init__(**kw)
 
 
 class Exponential(Taper1D):
@@ -257,7 +263,7 @@ class Exponential(Taper1D):
 
         opts = dict(f=f, f_is_normed=False)
         kw.update(opts)
-        super(Exponential, self).__init__(**kw)
+        super().__init__(**kw)
 
 
 class SmoothStep(Taper1D):
@@ -279,10 +285,11 @@ class SmoothStep(Taper1D):
         Smoothstep Taper Constructor.
         """
 
-        f = lambda x:  3*x**2 - 2*x**3
+        def f(x):
+            return 3 * x ** 2 - 2 * x ** 3
         opts = dict(f=f, f_is_normed=True)
         kw.update(opts)
-        super(SmoothStep, self).__init__(**kw)
+        super().__init__(**kw)
 
 
 class Klopfenstein(Taper1D):
@@ -300,7 +307,8 @@ class Klopfenstein(Taper1D):
         doi: 10.1109/JRPROC.1956.274847
         https://ieeexplore.ieee.org/document/4051841
     .. [#Kajfez] D. Kajfez and J. O. Prewitt, "Correction to "A Transmission Line Taper of Improved Design" (Letters),"
-        in IEEE Transactions on Microwave Theory and Techniques, vol. 21, no. 5, pp. 364-364, May 1973, doi: 10.1109/TMTT.1973.1128003.
+        in IEEE Transactions on Microwave Theory and Techniques, vol. 21, no. 5, pp. 364-364, May 1973,
+        doi: 10.1109/TMTT.1973.1128003.
         https://ieeexplore.ieee.org/document/1128003
     """
     def __init__(self, **kw):

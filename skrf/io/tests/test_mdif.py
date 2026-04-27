@@ -1,10 +1,13 @@
-# -*- coding: utf-8 -*-
-import unittest
 import os
+import tempfile
+import unittest
+
 import numpy as np
+
 import skrf as rf
-from pathlib import Path
-from zipfile import ZipFile
+from skrf.io.mdif import Mdif
+from skrf.networkSet import NetworkSet
+
 
 class MdifTestCase(unittest.TestCase):
     """
@@ -17,24 +20,24 @@ class MdifTestCase(unittest.TestCase):
         self.test_dir = os.path.dirname(os.path.abspath(__file__))+'/MDIF_CITI_MDL/'
 
         # constructor from filename
-        self.oneport_example1 = rf.Mdif(self.test_dir + 'test_1p_gmdif.mdf')
-        self.oneport_example2 = rf.Mdif(self.test_dir + 'test_1p_gmdif_2.mdf')
-        self.twoport_example1 = rf.Mdif(self.test_dir + 'test_2p_gmdif.mdf')
-        self.twoport_example2 = rf.Mdif(self.test_dir + 'test_2p_gmdif_2.mdf')
-        self.twoport_example3 = rf.Mdif(self.test_dir + 'test_2p_gmdif_3.mdf')
-        self.twoport_example_z = rf.Mdif(self.test_dir + 'test_2p_gmdif_z.mdf')
-        self.twoport_example_yz = rf.Mdif(self.test_dir + 'test_2p_gmdif_yz.mdf')
-        
-        self.fourport_example1 = rf.Mdif(self.test_dir + 'test_4p_gmdif.mdf')
+        self.oneport_example1 = Mdif(self.test_dir + 'test_1p_gmdif.mdf')
+        self.oneport_example2 = Mdif(self.test_dir + 'test_1p_gmdif_2.mdf')
+        self.twoport_example1 = Mdif(self.test_dir + 'test_2p_gmdif.mdf')
+        self.twoport_example2 = Mdif(self.test_dir + 'test_2p_gmdif_2.mdf')
+        self.twoport_example3 = Mdif(self.test_dir + 'test_2p_gmdif_3.mdf')
+        self.twoport_example_z = Mdif(self.test_dir + 'test_2p_gmdif_z.mdf')
+        self.twoport_example_yz = Mdif(self.test_dir + 'test_2p_gmdif_yz.mdf')
+
+        self.fourport_example1 = Mdif(self.test_dir + 'test_4p_gmdif.mdf')
 
         self.examples = [self.oneport_example1, self.oneport_example2,
-                         self.twoport_example1, self.twoport_example2, 
+                         self.twoport_example1, self.twoport_example2,
                          self.twoport_example3,
                          self.fourport_example1]
 
         # constructor from file-object
         file = open(self.test_dir + 'test_1p_gmdif.mdf')
-        self.oneport_example1_from_fo = rf.Mdif(file)
+        self.oneport_example1_from_fo = Mdif(file)
 
     def test_equal(self):
         """ Test the comparison between two Mdif objects """
@@ -45,7 +48,7 @@ class MdifTestCase(unittest.TestCase):
     def test_to_networkset(self):
         """ Test if MDIF are correctly converted into NetworkSet """
         for example in self.examples:
-            self.assertIsInstance(example.to_networkset(), rf.NetworkSet)
+            self.assertIsInstance(example.to_networkset(), NetworkSet)
 
     def test_params(self):
         """ Test if the params are correctly parsed from the MDIF files """
@@ -88,9 +91,26 @@ class MdifTestCase(unittest.TestCase):
         """Test reading a MDIF file which has comments after BEGIN ACDATA. """
         file = self.test_dir + 'test_comment_after_BEGIN.mdf'
         # Mdif Object Init
-        mdif = rf.Mdif(file)
+        mdif = Mdif(file)
         # to Networkset Init
-        ns = rf.NetworkSet.from_mdif(file)
+        ns = NetworkSet.from_mdif(file)
+
+    def test_read_and_write_back_noise(self):
+        net = rf.Network("skrf/io/tests/ts/ex_18.s2p")
+        nset1 = NetworkSet([net.copy() for _i in range(4)])
+
+        #nset1 = NetworkSet.from_mdif("amplifier.mdf")
+        with tempfile.TemporaryDirectory() as tempdir:
+            nset1.write_mdif(os.path.join(tempdir, "out1.mdf"))
+            nset2 = NetworkSet.from_mdif(os.path.join(tempdir, "out1.mdf"))
+            nset2.write_mdif(os.path.join(tempdir, "out2.mdf"))
+            nset3 = NetworkSet.from_mdif(os.path.join(tempdir, "out2.mdf"))
+            nset3.write_mdif(os.path.join(tempdir, "out3.mdf"))
+            nset4 = NetworkSet.from_mdif(os.path.join(tempdir, "out3.mdf"))
+            assert nset1 == nset4
+
+            for n1, n2 in zip(nset1, nset4):
+                np.testing.assert_allclose(n1.noise, n2.noise)
 
 
 suite = unittest.TestLoader().loadTestsFromTestCase(MdifTestCase)

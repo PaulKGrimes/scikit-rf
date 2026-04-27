@@ -1,5 +1,5 @@
 .ipynb_checkpoints
-.gitignore
+!.git*
 
 *.pyc
 *~
@@ -15,10 +15,13 @@ scikit_rf.egg-info/
 dist/
 *.idea/
 *__pycache__/
-qtapps/sandbox*
 *.iml
 
 .vscode/
-.coverage
-.tox/
 .coverage*
+
+poetry.lock
+lint.xml
+.venv/
+test-results/*.xml
+testing.xlsx

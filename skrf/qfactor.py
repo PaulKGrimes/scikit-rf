@@ -78,19 +78,19 @@ the coupling factor, then measure :math:`Q_L` from the 3 dB bandwidth
 and using the relationships above.
 
 Fortunately, scikit-rf implements methods for determining loaded and
-unloaded Q-factors from frequency-domain S-parameters. The implemented methods 
-are described in detail in [MAT58]_, and can be applied to measurements of 
+unloaded Q-factors from frequency-domain S-parameters. The implemented methods
+are described in detail in [MAT58]_, and can be applied to measurements of
 transmission or reflection.
 
 Q-factor determination through equivalent-circuit models
 --------------------------------------------------------
 Characterisation of resonances from measurements in the frequency-domain
 can be achieved through equivalent-circuit models [MAT58]_. Resonators can be
-modelled as an ideal RLC resonator connected to an external circuit, 
+modelled as an ideal RLC resonator connected to an external circuit,
 incorporating elements to account for a lossy coupling and coupling reactances.
 
-For high Q-factor resonators (in practice, :math:`Q_L` > 100), the S-parameter 
-response of a resonator measured in a calibrated system with reference planes 
+For high Q-factor resonators (in practice, :math:`Q_L` > 100), the S-parameter
+response of a resonator measured in a calibrated system with reference planes
 at the resonator couplings can be expressed like [MAT58]_, [Galwas]_ :
 
 .. math::
@@ -128,13 +128,18 @@ References
    pp. 669–671, Aug. 1983, doi: 10.1109/TMTT.1983.1131566.
 
 """
-import numpy as np
-from .network import Network
-from .frequency import Frequency
-from .constants import NumberLike
-from typing import Union
+from __future__ import annotations
+
+from logging import getLogger
 from warnings import warn
 
+import numpy as np
+
+from .constants import NumberLike
+from .frequency import Frequency
+from .network import Network
+
+logger = getLogger(__name__)
 
 # Available resonance types
 RESONANCE_TYPES = ['reflection', 'reflection_method2',
@@ -195,7 +200,7 @@ class OptimizedResult(dict):
         return list(self.keys())
 
 
-class Qfactor(object):
+class Qfactor:
     """
     Q-factor calculation class.
 
@@ -239,10 +244,14 @@ class Qfactor(object):
     def __init__(self,
                  ntwk: Network,
                  res_type: str,
-                 Q_L0: Union[None, float] = None,
-                 f_L0: Union[None, float] = None,
-                 verbose: bool = False):
+                 Q_L0: None | float = None,
+                 f_L0: None | float = None,
+                 verbose: bool | None = None):
         """Q-factor initializer."""
+        if verbose is not None:
+            warn('The "verbose" parameter is deprecated and will be removed in a future release. '
+                          'Use logging configuration instead.', FutureWarning, stacklevel=2)
+
         # check ntwk is a 1-port
         if ntwk.nports != 1:
             raise ValueError('The Network is not a 1-port Network.')
@@ -257,7 +266,6 @@ class Qfactor(object):
         self._ntwk = ntwk
         self.res_type = res_type
         self.tol = 1.0e-5
-        self.verbose = verbose
         self.fitted = False
         self.opt_res = None
 
@@ -291,10 +299,10 @@ class Qfactor(object):
         method : str, optional
             Fitting method : 'NLQFIT6' (default), 'NLQFIT7', 'NLQFIT8':
 
-            - 'NLQFIT6': Least Square Minimum of Eq.21 [MAT58]_ with 6 coeffcients.
-            - 'NLQFIT7': Least Square Minimum of Eq.26 [MAT58]_ with 7 coeffcients,
+            - 'NLQFIT6': Least Square Minimum of Eq.21 [MAT58]_ with 6 coefficients.
+            - 'NLQFIT7': Least Square Minimum of Eq.26 [MAT58]_ with 7 coefficients,
               including one that characterize the trans. line length.
-            - 'NLQFIT8': Least Square Minimum of Eq.43 [MAT58]_ with 8 coeffcients,
+            - 'NLQFIT8': Least Square Minimum of Eq.43 [MAT58]_ with 8 coefficients,
               A model for frequency-dependent leakage.
         loop_plan : str, optional
             Defines order of steps used by the fitting process.
@@ -328,7 +336,7 @@ class Qfactor(object):
         if loop_plan[0] == "w":
             raise ValueError("First item in loop_plan must not be w (weight calculation)")
         if loop_plan[-1] != "c":
-            warn("Last item in loop_plan is not c so convergence not tested!")
+            warn("Last item in loop_plan is not c so convergence not tested!", stacklevel=2)
 
         self.method = method
         self.loop_plan = loop_plan
@@ -342,13 +350,13 @@ class Qfactor(object):
             result = self._optimise_fit8(self.N)
 
         # overwrite results in self
-        self.Q_L = float(result.Q_L)
-        self.f_L = float(result.f_L)
+        self.Q_L = result.Q_L
+        self.f_L = result.f_L
         self.fitted = True
         self.opt_res = result
 
         if result.Q_L < 0:
-            warn('Negative Q_L, fitting may be inaccurate.')
+            warn('Negative Q_L, fitting may be inaccurate.', stacklevel=2)
 
         return result
 
@@ -397,8 +405,8 @@ class Qfactor(object):
 
     def _initial_fit(self,
                     N: int,
-                    Q_L0: Union[float, None] = None,
-                    f_L0: Union[None, float] = None
+                    Q_L0: float | None = None,
+                    f_L0: None | float = None
                     ):
         """Initial Linear least squares Q-factor fit.
 
@@ -444,14 +452,12 @@ class Qfactor(object):
 
         # Q_L0 : An order-of-magnitude estimate for Q_L-factor
         if Q_L0 is None:
-            Tol = self.tol * np.argmax(np.abs(self.s))
             # The value 5.0 should work well
             # for initial and optimised fits (Section 2.6).
             mult = 5.0
             Q_L0 = mult * f_L0/(self.f[-1] - self.f[0])
 
-        if self.verbose:
-            print(f'Initial estimation: Q_L0={Q_L0}, f_L0={f_L0}')
+        logger.debug(f"Initial estimation: Q_L0={Q_L0}, f_L0={f_L0}")
 
         N2 = 2 * N
         M = np.zeros([N2, 5])
@@ -462,12 +468,12 @@ class Qfactor(object):
             t = 2.0 * (self.f[i] / f_L0 - 1.0)
             y = 1.0 / complex(1.0, Q_L0 * t)
             v = t * y
-            v1 = y * self.s[i]
+            v1 = y * self.s[i, 0, 0]
             G[i] = v1.real
             G[i2] = v1.imag
             v2 = v1 * t
-            M[i, :] = v.real, -v.imag, y.real, -y.imag, v2.imag
-            M[i2, :] = v.imag, v.real, y.imag, y.real, -v2.real
+            M[i, :] = np.array([v.real, -v.imag, y.real, -y.imag, v2.imag])
+            M[i2, :] = np.array([v.imag, v.real, y.imag, y.real, -v2.real])
 
         T = M.transpose()  # unweighted
         C = T @ M
@@ -475,13 +481,12 @@ class Qfactor(object):
         sv = np.linalg.solve(C, q)
         a_re, a_im, b_re, b_im, Q_L = sv
 
-        self._a = a_re + 1j*a_im
-        self._b = b_re + 1j*b_im
-        self.Q_L = Q_L
+        self._a = (a_re + 1j*a_im)[0]
+        self._b = (b_re + 1j*b_im)[0]
+        self.Q_L = Q_L[0]
         self.f_L = f_L0
 
-        if self.verbose:
-            print(f'Preliminary estimation: Q_L={self.Q_L}, f_L={self.f_L}')
+        logger.debug(f"Preliminary estimation: Q_L={self.Q_L}, f_L={self.f_L}")
 
 
     def _optimise_fit6(self, N: int):
@@ -531,8 +536,7 @@ class Qfactor(object):
                 # PV = self.angular_weights(m5)
                 weighting_ratio = max(PV) / min(PV)
                 PV2 = np.concatenate((PV, PV))
-                if self.verbose:
-                    print("Op w, Calculate weights")
+                logger.debug("Op w, Calculate weights")
                 last_op = "n"
             elif op == "c":
                 seek_convergence = True
@@ -563,7 +567,7 @@ class Qfactor(object):
                 T = np.multiply(X, PV2)
                 C = np.dot(T, M)
                 q = np.dot(T, G)
-                dm = np.linalg.solve(C, q)
+                dm = np.linalg.solve(C, q)[:,0]
                 m1 += dm[0]
                 m2 += dm[1]
                 m3 += dm[2]
@@ -585,11 +589,10 @@ class Qfactor(object):
                     SumNum = SumNum + ip * (E.real * E.real + E.imag * E.imag)
                     SumDen = SumDen + ip
                 RMS_Error = np.sqrt(SumNum / SumDen)
-                if self.verbose:
-                    if last_op == "c":
-                        print(f"Iteration {iterations}, RMS Error: {RMS_Error}")
-                    else:
-                        print(f"op {op}, Iteration {iterations}, RMS Error: {RMS_Error}")
+                if last_op == "c":
+                    logger.debug(f"Iteration {iterations}, RMS Error: {RMS_Error}")
+                else:
+                    logger.debug(f"op {op}, Iteration {iterations}, RMS Error: {RMS_Error}")
                 last_op = op
 
                 if seek_convergence:
@@ -599,8 +602,7 @@ class Qfactor(object):
                 else:
                     TerminationConditionMet = True
             # After last operation, we end up here ...
-            if self.verbose:
-                print("Optimization done.")
+            logger.debug("Optimization done.")
 
 
         return OptimizedResult({
@@ -686,8 +688,7 @@ class Qfactor(object):
                 PV = self.angular_weights(self.f, Flwst * m5 / m6, m5)
                 weighting_ratio = max(PV) / min(PV)
                 PV2 = np.concatenate((PV, PV))
-                if self.verbose:
-                    print("Op w, Calculate weights")
+                logger.debug("Op w, Calculate weights")
                 last_op = "n"
                 continue
             if op == "c":
@@ -717,23 +718,23 @@ class Qfactor(object):
                     u2 = -u * self.f[i] / Flwst
                     v = (c2 + y * c3) * expm7
                     u3 = v * fdn
-                    M[i, :] = (
-                        expm7.real,
+                    M[i, :] = np.array(
+                        [expm7.real,
                         -expm7.imag,
                         ym.real,
                         -ym.imag,
                         u.real,
                         u2.real,
-                        -u3.imag,
+                        -u3.imag]
                     )
-                    M[i2, :] = (
-                        expm7.imag,
+                    M[i2, :] = np.array(
+                        [expm7.imag,
                         expm7.real,
                         ym.imag,
                         ym.real,
                         u.imag,
                         u2.imag,
-                        u3.real,
+                        u3.real]
                     )
                     r = self.s[i] - v  # residual
                     G[i] = r.real
@@ -742,7 +743,7 @@ class Qfactor(object):
                 T = np.multiply(X, PV2)
                 C = np.dot(T, M)
                 q = np.dot(T, G)
-                dm = np.linalg.solve(C, q)
+                dm = np.linalg.solve(C, q)[:,0]
                 m1 += dm[0]
                 m2 += dm[1]
                 m3 += dm[2]
@@ -768,11 +769,10 @@ class Qfactor(object):
                     SumNum = SumNum + ip * (E.real * E.real + E.imag * E.imag)
                     SumDen = SumDen + ip
                 RMS_Error = np.sqrt(SumNum / SumDen)
-                if self.verbose:
-                    if last_op == "c":
-                        print(f"Iteration {iterations}, RMS Error: {RMS_Error}")
-                    else:
-                        print(f"op {op}, Iteration {iterations}, RMS Error: {RMS_Error}")
+                if last_op == "c":
+                    logger.debug(f"Iteration {iterations}, RMS Error: {RMS_Error}")
+                else:
+                    logger.debug(f"op {op}, Iteration {iterations}, RMS Error: {RMS_Error}")
 
                 last_op = op
 
@@ -783,8 +783,7 @@ class Qfactor(object):
                 else:
                     TerminationConditionMet = True
             # After last operation, we end up here ...
-            if self.verbose:
-                print("Optimization done.")
+            logger.debug("Optimization done.")
 
         return OptimizedResult({
             'success': TerminationConditionMet,
@@ -870,8 +869,7 @@ class Qfactor(object):
                 PV = self.angular_weights(self.f, Flwst * float(m5) / float(m6), float(m5))
                 weighting_ratio = max(PV) / min(PV)
                 PV2 = np.concatenate((PV, PV))
-                if self.verbose:
-                    print("Op w, Calculate weights")
+                logger.debug("Op w, Calculate weights")
                 last_op = "n"
                 continue
             if op == "c":
@@ -897,8 +895,8 @@ class Qfactor(object):
                     u2 = -u * self.f[i] / Flwst
                     FL = Flwst * m5 / m6
                     t = 2 * (self.f[i] - FL) / FL
-                    M[i, :] = 1.0, 0.0, y.real, -y.imag, u.real, u2.real, t, 0.0
-                    M[i2, :] = 0.0, 1.0, y.imag, y.real, u.imag, u2.imag, 0.0, t
+                    M[i, :] = np.array([1.0, 0.0, y.real, -y.imag, u.real, u2.real, t, 0.0])
+                    M[i2, :] = np.array([0.0, 1.0, y.imag, y.real, u.imag, u2.imag, 0.0, t])
                     v = c2 + c3 * y + (m8 + 1j * m9) * t
                     r = self.s[i] - v  # residual
                     G[i] = r.real
@@ -907,7 +905,7 @@ class Qfactor(object):
                 T = np.multiply(X, PV2)
                 C = np.dot(T, M)
                 q = np.dot(T, G)
-                dm = np.linalg.solve(C, q)
+                dm = np.linalg.solve(C, q)[:,0]
                 m1 += dm[0]
                 m2 += dm[1]
                 m3 += dm[2]
@@ -939,11 +937,10 @@ class Qfactor(object):
                     SumNum = SumNum + ip * (E.real * E.real + E.imag * E.imag)
                     SumDen = SumDen + ip
                 RMS_Error = np.sqrt(SumNum / SumDen)
-                if self.verbose:
-                    if last_op == "c":
-                        print(f"Iteration {iterations}, RMS Error: {RMS_Error}")
-                    else:
-                        print(f"{op}, Iteration {iterations}, RMS Error: {RMS_Error}")
+                if last_op == "c":
+                    logger.debug(f"Iteration {iterations}, RMS Error: {RMS_Error}")
+                else:
+                    logger.debug(f"{op}, Iteration {iterations}, RMS Error: {RMS_Error}")
 
                 last_op = op
 
@@ -954,8 +951,7 @@ class Qfactor(object):
                 else:
                     TerminationConditionMet = True
             # After last operation, we end up here ...
-            if self.verbose:
-                print("Optimization done.")
+            logger.debug("Optimization done.")
 
         return OptimizedResult({
             'success': TerminationConditionMet,
@@ -969,8 +965,8 @@ class Qfactor(object):
             })
 
     def Q_circle(self,
-                 opt_res: Union[None, OptimizedResult] = None,
-                 A: Union[None, float] = None
+                 opt_res: None | OptimizedResult = None,
+                 A: None | float = None
                  ) -> list:
         r"""Q-circle diameter.
 
@@ -979,9 +975,9 @@ class Qfactor(object):
 
         Parameters
         ----------
-       opt_res : None or :class:`~skrf.qfactor.OptimizedResult`. Default is None.
-           Solution produced by the :meth:`~skrf.qfactor.Qfactor.fit` method.
-           If None, uses the solution previously calculated, if performed. 
+        opt_res : None or :class:`~skrf.qfactor.OptimizedResult`. Default is None.
+            Solution produced by the :meth:`~skrf.qfactor.Qfactor.fit` method.
+            If None, uses the solution previously calculated, if performed.
         A : None of float. Default is None.
             Scaling factor as defined in MAT 58 [MAT58]_.
             For `reflection` resonance type, can be set as None
@@ -1005,7 +1001,7 @@ class Qfactor(object):
 
         """
         # if no solution passed, use internal solution if exist
-        if opt_res is None: 
+        if opt_res is None:
             if self.opt_res is None:
                 raise ValueError('No solution found or passed.')
             else:
@@ -1015,11 +1011,11 @@ class Qfactor(object):
         # m2 : imag part of cal_gamma_V
         # m3 : real part of b + j a/Q_L
         # m4 : imag part of b + j a/Q_L
-        m1, m2, m3, m4 = [opt_res[key] for key in ['m1', 'm2', 'm3', 'm4']]
+        m1, m2, m3, m4 = (opt_res[key] for key in ['m1', 'm2', 'm3', 'm4'])
 
         if A is None:
             A = 1.0 / abs(complex(m1, m2))  # scale to S_V
-        elif not isinstance(A, (int, float)):
+        elif not isinstance(A, int | float):
             raise ValueError("A should be a float or None")
 
         aqratio = complex(m1, m2)
@@ -1031,8 +1027,8 @@ class Qfactor(object):
 
 
     def Q_unloaded(self,
-                   opt_res: Union[None, OptimizedResult] = None,
-                   A: Union[None, float] = None
+                   opt_res: None| OptimizedResult = None,
+                   A: None | float = None
                    ) -> float:
         """Unloaded Q-factor Q0.
 
@@ -1041,9 +1037,9 @@ class Qfactor(object):
 
         Parameters
         ----------
-       opt_res : None or :class:`~skrf.qfactor.OptimizedResult`. Default is None.
-           Solution produced by the :meth:`~skrf.qfactor.Qfactor.fit` method.
-           If None, uses the solution previously calculated, if performed. 
+        opt_res : None or :class:`~skrf.qfactor.OptimizedResult`. Default is None.
+            Solution produced by the :meth:`~skrf.qfactor.Qfactor.fit` method.
+            If None, uses the solution previously calculated, if performed.
         A : float or None. Default is None.
             Scaling factor as defined in MAT 58 [MAT58]_.
             For `reflection` resonance type, can be set as None
@@ -1062,7 +1058,7 @@ class Qfactor(object):
 
         """
         # if no solution passed, use internal solution if exist
-        if opt_res is None: 
+        if opt_res is None:
             if self.opt_res is None:
                 raise ValueError('No solution found or passed.')
             else:
@@ -1070,13 +1066,12 @@ class Qfactor(object):
 
         if A is None:
             auto_flag = True
-        elif isinstance(A, (int, float)):
+        elif isinstance(A, int | float):
             auto_flag = False
         else:
             raise ValueError("Illegal Scaling factor; should be a float or  None")
 
-        m1, m2, m3, m4, m5 = [opt_res[key] for key in ['m1', 'm2', 'm3', 'm4', 'Q_L']]
-        FL = opt_res['f_L']
+        m1, m2, m3, m4, m5 = (opt_res[key] for key in ['m1', 'm2', 'm3', 'm4', 'Q_L'])
 
         if self.res_type == "transmission":
             if auto_flag:
@@ -1088,13 +1083,11 @@ class Qfactor(object):
 
         elif self.res_type == "reflection":
             if auto_flag:
-                if self.verbose:
-                    print('A is undefined: using fitted data to estimate it')
+                logger.debug("A is undefined: using fitted data to estimate it")
                 A = 1.0 / abs(complex(m1, m2))  # scale to S_V if A not defined
             cal_diam, S_V, S_T = self.Q_circle(opt_res, A)
             cal_touching_circle_diam = 2.0
-            if self.verbose:
-                print(f"Q-circle diam = {cal_diam}, touching_circle_diam = {cal_touching_circle_diam}")
+            logger.debug(f"Q-circle diam = {cal_diam}, touching_circle_diam = {cal_touching_circle_diam}")
             den = cal_touching_circle_diam / cal_diam - 1.0
             Q0 = m5 * (1.0 + 1.0 / den)
 
@@ -1109,22 +1102,19 @@ class Qfactor(object):
                 2.0 * gv * cal_diam
             )  # Cosine rule
             cal_touching_circle_diam = (1.0 - gv2) / (1.0 - gv * cosphi)
-            if self.verbose:
-                print(f"Q-circle diam = {cal_diam}, touching_circle_diam = {cal_touching_circle_diam}")
+            logger.debug(f"Q-circle diam = {cal_diam}, touching_circle_diam = {cal_touching_circle_diam}")
             den = cal_touching_circle_diam / cal_diam - 1.0
             Q0 = m5 * (1.0 + 1.0 / den)
 
         elif self.res_type == "notch" or self.res_type == "absorption":  # By transmission
             if auto_flag:
-                if self.verbose:
-                    print(
-                        'Notch/absorption Qo calculation: using fitted data to estimate scaling factor'
-                    )
+                logger.debug(
+                    "Notch/absorption Qo calculation: using fitted data to estimate scaling factor"
+                )
                 # scale to S_V if A is undefined
                 A = 1.0 / abs(complex(m1, m2))
             cal_diam, S_V, S_T = self.Q_circle(opt_res, A)
-            if self.verbose:
-                print(f"Q-circle diam = {cal_diam}")
+            logger.debug(f"Q-circle diam = {cal_diam}")
             if cal_diam == 1.0:
                 raise ZeroDivisionError("Divide by zero forestalled in calculation of Qo")
             den = 1.0 / cal_diam - 1.0  # Gao thesis (2008) 4.35 and 4.40
@@ -1138,9 +1128,10 @@ class Qfactor(object):
         return Q0
 
     def fitted_s(self,
-                 opt_res: Union[None, OptimizedResult] = None,
-                 f: Union[None, np.ndarray] = None
+                 opt_res: None | OptimizedResult = None,
+                 f: None | np.ndarray = None
                  ) -> np.ndarray:
+        # if no solution passed, use internal solution if exist
         r"""S-parameter response of an equivalent circuit model resonator.
 
         The approximate solution and estimated is obtained from [MAT58]_:
@@ -1158,9 +1149,9 @@ class Qfactor(object):
 
         Parameters
         ----------
-       opt_res : None or :class:`~skrf.qfactor.OptimizedResult`. Default is None.
-           Solution produced by the :meth:`~skrf.qfactor.Qfactor.fit` method.
-           If None, uses the solution previously calculated, if performed. 
+        opt_res : None or :class:`~skrf.qfactor.OptimizedResult`. Default is None.
+            Solution produced by the :meth:`~skrf.qfactor.Qfactor.fit` method.
+            If None, uses the solution previously calculated, if performed.
         f : None or np.ndarray. Default is None.
             frequency array [Hz]. If None, use the self frequencies.
 
@@ -1177,8 +1168,7 @@ class Qfactor(object):
             section 2.2, eqn. (21).
 
         """
-        # if no solution passed, use internal solution if exist
-        if opt_res is None: 
+        if opt_res is None:
             if self.opt_res is None:
                 raise ValueError('No solution found or passed.')
             else:
@@ -1195,8 +1185,8 @@ class Qfactor(object):
         return s
 
     def fitted_network(self,
-                       opt_res: Union[None, OptimizedResult] = None,
-                       frequency: Union[None, Frequency] = None,
+                       opt_res: None | OptimizedResult = None,
+                       frequency: None | Frequency = None,
                        ) -> Network:
         """Fitted Network.
 
@@ -1206,7 +1196,7 @@ class Qfactor(object):
         ----------
         opt_res : None or :class:`~skrf.qfactor.OptimizedResult`. Default is None.
             Solution produced by the :meth:`~skrf.qfactor.Qfactor.fit` method.
-            If None, uses the solution previously calculated, if performed. 
+            If None, uses the solution previously calculated, if performed.
         frequency : None or :class:`~skrf.frequency.Frequency`. Default is None.
             Frequency for the fitted Network. If None, use the same
             Frequency than the one used to create the QFactor.
@@ -1218,7 +1208,7 @@ class Qfactor(object):
 
         """
         # if no solution passed, use internal solution if exist
-        if opt_res is None: 
+        if opt_res is None:
             if self.opt_res is None:
                 raise ValueError('No solution found or passed.')
             else:
@@ -1241,14 +1231,14 @@ class Qfactor(object):
         -------
         float
             Resonant frequency in the frequency unit.
-            
+
         See Also
         --------
         f_L : Resonant Frequency in Hz.
 
         """
         if not self.fitted:
-            warn('Q-factor not fitted, result may be inaccurate. Use the .fit() method before.')
+            warn('Q-factor not fitted, result may be inaccurate. Use the .fit() method before.', stacklevel=2)
         return self.f_L/self.f_multiplier
 
     @property
@@ -1274,7 +1264,7 @@ class Qfactor(object):
 
         """
         if not self.fitted:
-            warn('Q-factor not fitted, result may be inaccurate. Use the .fit() method before.')
+            warn('Q-factor not fitted, result may be inaccurate. Use the .fit() method before.', stacklevel=2)
         return self.f_L/self.Q_L
 
     @property
@@ -1292,5 +1282,5 @@ class Qfactor(object):
 
         """
         if not self.fitted:
-            warn('Q-factor not fitted, result may be inaccurate. Use the .fit() method before.')
+            warn('Q-factor not fitted, result may be inaccurate. Use the .fit() method before.', stacklevel=2)
         return self.BW/self.f_multiplier

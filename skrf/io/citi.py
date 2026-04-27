@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 .. module:: skrf.io.citi
 
@@ -14,17 +13,21 @@ Citi class and utilities
    Citi
 
 """
-import numpy as np
+from __future__ import annotations
 
-import numpy as np
 import typing
-from ..util import get_fid
-from ..frequency import Frequency
-from ..network import Network, z2s, y2s
-from ..networkSet import NetworkSet
-from ..mathFunctions import magdeg_2_reim
+from pathlib import Path
 
-class Citi():
+import numpy as np
+
+from ..frequency import Frequency
+from ..mathFunctions import magdeg_2_reim
+from ..network import Network, z2s
+from ..networkSet import NetworkSet
+from ..util import get_fid
+
+
+class Citi:
     """
     Class to read CITI N-port files.
 
@@ -41,7 +44,8 @@ class Citi():
     References
     ----------
     .. [#] https://na.support.keysight.com/plts/help/WebHelp/FilePrint/CITIfile_Format.htm
-    .. [#] Handbook of Microwave Component Measurements: with Advanced VNA Techniques, Joel P. Dunsmore, 2020, Section 6.1.6.1
+    .. [#] Handbook of Microwave Component Measurements: with Advanced VNA Techniques, Joel P. Dunsmore, 2020,
+    Section 6.1.6.1
 
     Examples
     --------
@@ -54,13 +58,13 @@ class Citi():
     >>> file = open('network.cti')
     >>> m = rf.Citi(file)
     """
-    def __init__(self, file: typing.Union[str, typing.TextIO]):
+    def __init__(self, file: str | Path | typing.TextIO):
         """
         Constructor
 
         Parameters
         ----------
-        file : str or file-object
+        file : str, Path, or file-object
             mdif file to load
         """
         self._comments = []
@@ -165,12 +169,12 @@ class Citi():
                 data_list.append(name)  # to be popped out after
 
             if line.strip().upper().startswith('VAR_LIST_BEGIN'):
-                # read the number of occurence lines for a param (FIFO param)
+                # read the number of occurrence lines for a param (FIFO param)
                 _param_values = []
                 cur_name = params_list.pop(0)
-                for idx in range(self._params[cur_name]['occurences']):
+                for _idx in range(self._params[cur_name]['occurences']):
                     line = lines.pop(0)  # goes next line
-                    # reads the nb of occurences
+                    # reads the nb of occurrences
                     _param_values.append(line.strip())
 
                 self._params[cur_name]['values'] = np.array(_param_values, dtype=float)
@@ -179,9 +183,9 @@ class Citi():
                 _data_values = []
                 cur_name = data_list.pop(0)
                 # data are ordered for each param(s), then for each frequency
-                # so number of lines to read is the product of the occurences of each param
+                # so number of lines to read is the product of the occurrences of each param
                 nb_lines = np.prod([self._params[name]['occurences'] for name in self._params.keys()])
-                for idx in range(nb_lines):
+                for _idx in range(nb_lines):
                     line = lines.pop(0)  # goes next line
                     # Expect:
                     #    val1, val2
@@ -215,10 +219,17 @@ class Citi():
         networks = []
 
         # should find the frequency parameter
-        if not 'freq' in [it.lower() for it in self._params.keys()]:
+        if 'freq' not in [it.lower() for it in self._params.keys()]:
             raise ValueError('Frequency points not found')
 
-        freq = Frequency.from_f(self._params['freq']['values'])
+        # no VAR except for freq has been found
+        # Create a dummy parameter to not return an empty list
+        if len(self._params.keys()) == 1 and 'freq' in self._params.keys():
+            self._params["dummy"] = {}
+            self._params["dummy"]['values'] = np.array([0])
+            self._params["dummy"]['occurences'] = 1
+
+        freq = Frequency.from_f(self._params['freq']['values'], unit='Hz')
 
         # Network parameters: search for S, then Z or Y
         if any([it.startswith('S') for it in self._data.keys()]):
@@ -231,21 +242,32 @@ class Citi():
         # deduce the rank of the Network
         rank = int(np.sqrt(len([it for it in self._data.keys() if it.startswith(ntwkprm)])))
 
-        # Network parameter generic array
-        p = np.zeros((len(freq), rank, rank), dtype=complex)
-        
         # occurences of each parameter and total number of frequency sets
         occurences = [self._params[name]['occurences'] for name in self.params]
         occ = np.prod(occurences)
-       
+
+        # Network parameter generic array
+        p = np.zeros((occ, len(freq), rank, rank), dtype=complex)
+
         # create a 2D array of all parameters sets
         if self.params:
-            params_sets = np.array(np.meshgrid(*[self._params[name]['values'] 
+            params_sets = np.array(np.meshgrid(*[self._params[name]['values']
                                            for name in self.params])).reshape(-1,len(self.params))
         else:
             params_sets = []
 
-        z0 = 50  # TODO extract from PortZ[port]
+        # extract from PortZ[port]
+        z0s = np.full((occ, len(freq), rank), 50, dtype=complex)
+        if any(k.upper().startswith('PORTZ') for k in self._data.keys()):
+            # could be PortZ or PORTZ depending CTI file
+            if any(k.startswith('PortZ') for k in self._data.keys()):
+                zname = 'PortZ'
+            else:
+                zname = 'PORTZ'
+
+            for m in range(rank):
+                for idx_set in range(len(params_sets)):
+                    z0s[idx_set,:,m] = self._data[f'{zname}[{m+1}]']['values'].reshape((int(occ), len(freq)))[idx_set,:]
 
         # create list of Networks assuming the following ordering:
         # val_param1_f1
@@ -259,26 +281,29 @@ class Citi():
             for n in range(rank):
                 # network param (m,n) for all params and all frequencies
                 if f'{ntwkprm}[{m+1},{n+1}]' in self._data.keys():
-                    pp = self._data[f'{ntwkprm}[{m+1},{n+1}]']['values'].reshape((len(freq), int(occ)))
+                    pp = self._data[f'{ntwkprm}[{m+1},{n+1}]']['values'].reshape((int(occ), len(freq)))
                 else:
                     # special case some CITI files for 1port
-                    pp = self._data['S']['values'].reshape((len(freq), int(occ)))
+                    pp = self._data['S']['values'].reshape((int(occ), len(freq)))
                     ntwkprm = 'S'
-                    
-                for (idx_set, params_set) in enumerate(params_sets):
-                    # network param (m,n) for the current set of params 
-                    p[:,m,n] = pp[:,idx_set]
-                    # params dict {param1: val1, param2: val, etc}
-                    params = dict(zip(self.params, params_set))
-                    
-                    if ntwkprm == 'S':
-                        ntwk = Network(frequency=freq, s=p, params=params, z0=z0)
-                    elif ntwkprm == 'Z':
-                        ntwk = Network(frequency=freq, s=z2s(p, z0), params=params, z0=z0)
-                    else:
-                        raise NotImplementedError('Unknown Network Parameter')
-                    networks.append(ntwk)
-        
+
+                # network param (m,n) for the current set of params
+                for idx_set in range(len(params_sets)):
+                    p[idx_set,:,m,n] = pp[idx_set,:]
+
+        # generate networks from the network parameters and set of params
+        for (idx_set, params_set) in enumerate(params_sets):
+            # params dict {param1: val1, param2: val, etc}
+            params = dict(zip(self.params, params_set))
+
+            if ntwkprm == 'S':
+                ntwk = Network(frequency=freq, s=p[idx_set], params=params, z0=z0s[idx_set])
+            elif ntwkprm == 'Z':
+                ntwk = Network(frequency=freq, s=z2s(p[idx_set], z0s[idx_set]), params=params, z0=z0s[idx_set])
+            else:
+                raise NotImplementedError('Unknown Network Parameter')
+            networks.append(ntwk)
+
         return networks
 
 
@@ -289,6 +314,6 @@ class Citi():
         Returns
         -------
         ns : `skrf.networkset.NetworkSet`
-    
+
         """
         return NetworkSet(self.networks)

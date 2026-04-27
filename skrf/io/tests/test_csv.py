@@ -1,38 +1,39 @@
-
-import unittest
-import pytest
 import os
-import numpy as npy
+import unittest
+import warnings
+
+import numpy as np
+import pytest
 
 import skrf as rf
-
 from skrf.util import suppress_warning_decorator
 
+
 class AgilentCSVTestCase(unittest.TestCase):
-    """ 
+    """
     AgilentCSVTestCase tests the IO of agilent style CSV files
     """
     def setUp(self):
-        """ 
+        """
         Sets up the test directory and the initializes the members.
         This method gets the current file path to this file, then gets the file
         name for pna_csv_reim.csv file, then reads it in.
         """
         self.test_dir = os.path.dirname(os.path.abspath(__file__))+'/'
-        filename = os.path.join(self.test_dir, 'pna_csv_reim.csv')
-        self.acsv = rf.AgilentCSV(filename)
+        self.filename = os.path.join(self.test_dir, 'pna_csv_reim.csv')
+        self.acsv = rf.io.csv.AgilentCSV(self.filename)
 
     def test_columns(self):
-        """ 
+        """
         This tests reading of columns from the test file.
         """
         self.assertEqual(self.acsv.columns, ['Freq(Hz)', '"A,1"(REAL)',
                                              '"A,1"(IMAG)', '"R1,1"(REAL)',
                                              '"R1,1"(IMAG)'])
 
-    @pytest.mark.skip(reason='unicode error with carrage returns for p3 vs p2')
+    @pytest.mark.skip(reason='unicode error with carriage returns for p3 vs p2')
     def test_comments(self):
-        """ 
+        """
         This tests reading of comment lines in the test file.
         """
         self.assertEqual(self.acsv.comments.strip('\r'), 'this is a comment\nline\n')
@@ -42,15 +43,15 @@ class AgilentCSVTestCase(unittest.TestCase):
         This tests reading in of the data of the test file.
         """
         self.assertTrue((self.acsv.data ==
-                         npy.array([[750000000000, 1, 2, 3, 4],
+                         np.array([[750000000000, 1, 2, 3, 4],
                                     [1100000000000, 5, 6, 7,8],
                                    ])).all())
 
     def test_frequency(self):
-        """ 
+        """
         This tests the reading of frequency from the test file
         """
-        self.assertEqual(self.acsv.frequency, rf.F(750e9, 1100e9, 2, 'hz'))
+        self.assertEqual(self.acsv.frequency, rf.Frequency(750e9, 1100e9, 2, 'hz'))
 
     @suppress_warning_decorator("CSV format unrecognized")
     def test_networks(self):
@@ -65,3 +66,16 @@ class AgilentCSVTestCase(unittest.TestCase):
         """
         a = self.acsv.scalar_networks
 
+    def test_read_pna_csv(self):
+        """
+        This tests reading of a csv file written by an Agilient PNA.
+        """
+        with warnings.catch_warnings(record=True) as w:
+            with self.assertWarns(DeprecationWarning):
+                header, comment, data = rf.io.csv.read_pna_csv(self.filename)
+
+        self.assertEqual(header, 'Freq(Hz),"A,1"(REAL),"A,1"(IMAG),"R1,1"(REAL),"R1,1"(IMAG)')
+        self.assertEqual(comment, 'this is a comment\nline\n')
+        self.assertTrue((data == np.array([[750000000000, 1, 2, 3, 4],
+                                    [1100000000000, 5, 6, 7,8],
+                                ])).all())

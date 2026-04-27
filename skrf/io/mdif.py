@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 .. module:: skrf.io.mdif
 
@@ -14,28 +13,34 @@ Mdif class and utilities
    Mdif
 
 """
-import numpy as np
-from typing import Union, TextIO
-from ..util import get_fid
-from ..frequency import Frequency
-from ..network import Network, z2s, y2s
-from ..networkSet import NetworkSet
-from ..mathFunctions import magdeg_2_reim
-from itertools import product
+from __future__ import annotations
 
-class Mdif():
+from itertools import product
+from pathlib import Path
+from typing import TextIO
+
+import numpy as np
+
+from ..frequency import Frequency
+from ..mathFunctions import magdeg_2_reim
+from ..network import Network, y2s, z2s
+from ..networkSet import NetworkSet
+from ..util import get_fid
+
+
+class Mdif:
     """
     Class to read Generalized MDIF N-port files.
-    
-    Used to read the Generalized MDIF (GMDIF) file format [#]_ (.mdf extension). 
-    These files are used store Network parameters which vary with frequency 
-    and with one or more named parameters. 
+
+    Used to read the Generalized MDIF (GMDIF) file format [#]_ (.mdf extension).
+    These files are used store Network parameters which vary with frequency
+    and with one or more named parameters.
 
     Parameters
     ----------
     file : str or file-object
         mdif file to load
-                                                        
+
     References
     ----------
     .. [#] https://awrcorp.com/download/faq/english/docs/Users_Guide/data_file_formats.html#generalized_mdif
@@ -50,13 +55,13 @@ class Mdif():
 
     >>> file = open('network.mdf')
     >>> m = rf.Mdif(file)
-    
+
     List of named parameters defined in the MDIF file
-    
+
     >>> m.params
-    
+
     Convert the MDIF to a NetworkSet
-    
+
     >>> m.to_networkset()
 
     Using the data as a `NetworkSet` allows you to select a set of Networks
@@ -64,15 +69,15 @@ class Mdif():
     See `skrf.networkset.NetworkSet`.
 
     """
-    
-    def __init__(self, file: Union[str, TextIO]):
+
+    def __init__(self, file: str | Path | TextIO):
         """
         Constructor
-        
+
         Parameters
         ----------
-        file : str or file-object
-            mdif file to load        
+        file : str, Path, or file-object
+            mdif file to load
         """
         with get_fid(file) as fid:
             self.filename = fid.name
@@ -110,7 +115,7 @@ class Mdif():
     def networks(self) -> list:
         """
         List of Networks.
-        
+
         Returns
         -------
         list : list of :class:`~skrf.network.Network`
@@ -138,7 +143,13 @@ class Mdif():
             if line.strip().startswith('!'):
                 comments.append(line[1:].strip())
 
-        return ' '.join(comments)
+            # Break out after the first network starts, thereby only
+            # pulling out the comments for the entire NetworkSet, not
+            # everything for each network. That's pulled out later.
+            if line.strip().lower().startswith('begin'):
+                break
+
+        return comments
 
 
     def _parse_data(self, block_data: list) -> Network:
@@ -163,6 +174,7 @@ class Mdif():
         """
         kinds = []
         data_lines = []
+        comments = []
 
         # Assumes default unit and format if not found during parsing
         frequency_unit = 'hz'
@@ -172,10 +184,16 @@ class Mdif():
         nb_lines_per_freq = 1
         ntwk_name = ''
 
-        # Extract and group parameter informations and values
+        # Flag for adding comments to the network
+        no_more_comments = False
+
+        # Extract and group parameter information and values
         for line in block_data:
             # Parse the option line (as in Touchstone)
             if line.startswith('#'):
+                # Flag that no more comments are coming as we're now after the option line
+                no_more_comments = True
+
                 toks = line[1:].strip().split()
                 # fill the option line with the missing defaults
                 toks.extend(['ghz', 's', 'ma', 'r', '50'][len(toks):])
@@ -190,10 +208,13 @@ class Mdif():
                 if formt not in ['ma', 'db', 'ri']:
                     raise NotImplementedError(f'ERROR: illegal format value {formt}')
 
-            elif line.startswith('!'):
+            elif line.strip().startswith('!'):
                 if line[1:].startswith(' network name:'):
                     ntwk_name = line.split(':')[-1].strip()
-                    
+
+                # Append the comments to the list of comments for that data block
+                if no_more_comments is not False:
+                    comments.append(line.strip()[1:])
 
             # Parameter kinds (s11, z21, ...) are described as
             #
@@ -242,9 +263,9 @@ class Mdif():
 
         # Nport as in AWR MDIF file-format description
         elif (parameter == 's') and all(k in kinds for k in ['n11x', 'n11y']):
-            rank = round(np.sqrt(sum('n' in s for s in kinds)/2))                 
+            rank = round(np.sqrt(sum('n' in s for s in kinds)/2))
             s = values[:,:rank**2].reshape(len(f), rank, rank)
-            # if rank is 2 and S21 before S12, swap S21 and S12 
+            # if rank is 2 and S21 before S12, swap S21 and S12
             if rank == 2 and (kinds.index('n21x') < kinds.index('n12x')):
                 s[:, 1, 0], s[:, 0, 1] =  s[:, 0, 1].copy(), s[:, 1, 0].copy()
 
@@ -255,7 +276,7 @@ class Mdif():
             z = np.zeros((len(f), rank, rank), dtype=complex)
             for m in range(rank):
                 for n in range(rank):
-                    z[:,m,n] = values[:, kinds.index(f'z[{m+1},{n+1}]') - 1]            
+                    z[:,m,n] = values[:, kinds.index(f'z[{m+1},{n+1}]') - 1]
             s = z2s(z, z0=z0)
 
         # no S nor Z-parameter are found. Maybe Y-param instead?
@@ -265,15 +286,15 @@ class Mdif():
             y = np.zeros((len(f), rank, rank), dtype=complex)
             for m in range(rank):
                 for n in range(rank):
-                    y[:,m,n] = values[:, kinds.index(f'y[{m+1},{n+1}]') - 1]            
+                    y[:,m,n] = values[:, kinds.index(f'y[{m+1},{n+1}]') - 1]
             s = y2s(z, z0=z0)
-            
+
         else:
             raise NotImplementedError('Unrecognized case, probably not implemented')
 
         # building the Network
         freq = Frequency.from_f(f, unit=frequency_unit)
-        ntwk = Network(frequency=freq, s=s, z0=z0, name=ntwk_name)
+        ntwk = Network(frequency=freq, s=s, z0=z0, name=ntwk_name, comments="\n".join(comments))
 
         return ntwk
 
@@ -292,12 +313,11 @@ class Mdif():
         fid.seek(0)
 
         block_data = []
-        kinds = []
         ntwks = []
         params = dict()
 
-        in_a_block = False
         in_data_block = False
+        in_noise_block = False
 
         for line in fid:
 
@@ -307,9 +327,8 @@ class Mdif():
             # ...
             # VAR param_name_N = Z
             if line.lower().startswith('var'):
-                in_a_block = True
                 # current parameter
-                param_name, param_value = [s.strip() for s in line[3:].split('=')]
+                param_name, param_value = (s.strip() for s in line[3:].split('='))
                 # remove the datatype "(blah)" in "varname(blah)" if any
                 param_name = param_name.split('(')[0]
                 # try to convert the value as a number
@@ -325,21 +344,31 @@ class Mdif():
             # ....
             # end
             if line.lower().startswith('end'):
-                ntwk = self._parse_data(block_data)
-                ntwk.params = params
-                ntwks.append(ntwk)
+                if in_data_block:
+                    ntwk = self._parse_data(block_data)
+                    ntwk.params = params
+                    ntwks.append(ntwk)
+                    # reset parsed values
+                    in_data_block = False
+                    params = dict()
+                if in_noise_block:
+                    in_noise_block = False
+                    noise_arr = np.array(
+                        [e.split() for e in block_data if not e.startswith(("!", "#", "%"))]
+                        ).astype(float)
+                    freq, nfmin, gamma_opt_mag, gamma_opt_angle, rn = noise_arr.T
+                    nfreq = Frequency.from_f(freq, unit=ntwk.frequency.unit)
+                    gamma = gamma_opt_mag * np.exp(1j*np.deg2rad(gamma_opt_angle))
+                    ntwk.set_noise_a(nfreq, nfmin, gamma, rn * ntwk.z0[0,0])
 
-                # reset parsed values
-                in_data_block = False
-                in_a_block = False
                 block_data = []
-                kinds = []
-                params = dict()
 
-            if in_data_block:
+            if in_data_block or in_noise_block:
                 block_data.append(line)
 
-            if line.lower().startswith('begin'):
+            if line.lower().startswith("begin ndata"):
+                in_noise_block = True
+            elif line.lower().startswith('begin'):
                 in_data_block = True
 
         return ntwks
@@ -351,7 +380,7 @@ class Mdif():
         Returns
         -------
         ns : :class:`~skrf.networkSet.NetworkSet`
-        
+
         See Also
         --------
         from_networkset : Write a MDIF file from a NetworkSet.
@@ -364,9 +393,12 @@ class Mdif():
     @staticmethod
     def write(ns : NetworkSet,
               filename : str,
-              values: Union[dict, None] = None,
-              data_types: Union[dict, None] = None,
-              comments = []):
+              values: dict | None = None,
+              data_types: dict | None = None,
+              comments: str | None = None,
+              *,
+              ads_compatible: bool = True,
+              **kwargs):
         """
         Write a MDIF file from a NetworkSet.
 
@@ -377,7 +409,7 @@ class Mdif():
         filename : string
             Output MDIF file name.
         values : dictionary or None. Default is None.
-            The keys of the dictionnary are MDIF variables and its values are
+            The keys of the dictionary are MDIF variables and its values are
             a list of the parameter values.
             If None, then the values will be set to the NetworkSet names
             and the datatypes will be set to "string".
@@ -387,14 +419,21 @@ class Mdif():
         comments: list of strings
             Comments to add to output_file.
             Each list items is a separate comment line
-            
+        ads_compatible: bool. Default is True.
+            Indicates whether to write the file in a format that
+            ADS will read properly.
+        **kwargs: dictionary with extra arguments to pass through to the
+            underlying write_touchstone() method in the Network class
+
         See Also
         --------
         io.mdif.Mdif : MDIF file class
         to_networkset : Return the MDIF data as a NetworkSet
-        
+
         """
 
+        if comments is None:
+            comments = []
         if values is None:
             if ns.has_params():
                 values = ns.params_values
@@ -413,6 +452,9 @@ class Mdif():
                 # using Network names (->string)
                 data_types = {"name": "string"}
 
+        # Remove the return_string argument, as it's a required argument for this method
+        kwargs.pop('return_string', None)
+
         # VAR datatypes
         dict_types = dict({"int": "0", "double": "1", "string": "2"})
 
@@ -424,6 +466,7 @@ class Mdif():
                 mdif.write(f"! {c}\n")
 
             nports = ns[0].nports
+            is_noisy = ns[0].noisy
 
             optionstring = Mdif.__create_optionstring(nports)
 
@@ -436,27 +479,33 @@ class Mdif():
                     if p not in data_types:
                         data_types[p] = "double"
 
+                    var_type = "" if ads_compatible else f"({dict_types[data_types[p]]})"
                     if data_types[p] == "string":
-                        var_def_str = 'VAR {}({}) = "{}"'.format(
-                            p, dict_types[data_types[p]], values[p][filenumber]
-                        )
+                        var_def_str = f'VAR {p}{var_type} = "{values[p][filenumber]}"'
                     else:
-                        var_def_str = "VAR {}({}) = {}".format(
-                            p, dict_types[data_types[p]], values[p][filenumber]
-                        )
+                        var_def_str = f"VAR {p}{var_type} = {values[p][filenumber]}"
                     mdif.write(var_def_str + "\n")
 
                 mdif.write("\nBEGIN ACDATA\n")
                 mdif.write(optionstring + "\n")
                 mdif.write("! network name: " + ntwk.name + "\n")
-                data = ntwk.write_touchstone(return_string=True)
+
+                data = ntwk.write_touchstone(return_string=True, write_noise=False, **kwargs)
                 mdif.write(data)
+
+                if is_noisy:
+                    # this "END" terminates "ACDATA" (s-parameters) and begins noise ("NDATA")
+                    mdif.write("END\n\nBEGIN NDATA\n")
+                    mdif.write("%F nfmin n11x n11y rn\n")
+                    mdif.write(f"# {ntwk.frequency.unit} S MA R {ntwk.z0[0, 0].real}\n")
+                    ntwk._write_noisedata(output=mdif)
+
                 mdif.write("END\n\n")
 
     def __eq__(self, other) -> bool:
         """
         Test if two Mdif objects are equals.
-        
+
         Test the equality between the NetworkSet under the hood.
 
         Parameters
@@ -470,7 +519,7 @@ class Mdif():
 
         """
         return self.to_networkset() == other.to_networkset()
-    
+
     @staticmethod
     def __create_optionstring(nports):
         """create the options string based on the number of ports. Used in the Touchstone and MDIF formats"""
@@ -506,4 +555,4 @@ class Mdif():
                     if i[1] == nports:
                         optionstring += "\n"
 
-        return optionstring    
+        return optionstring

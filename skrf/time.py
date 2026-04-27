@@ -14,17 +14,29 @@ Time domain functions
    detect_span
    find_n_peaks
    indexes
+   get_window
 
 """
-from .util import find_nearest_index
-from scipy.ndimage import convolve1d
+from __future__ import annotations
+
+import warnings
+from collections.abc import Callable
+
+# imports for type hinting
+from typing import TYPE_CHECKING
+
+import numpy as np
+from numpy.fft import fft, fftshift, ifft, ifftshift, irfft, rfft
 from scipy import signal
-import numpy as npy
-from numpy import fft
-from typing import List
+from scipy.ndimage import convolve1d
+
+from .util import find_nearest_index
+
+if TYPE_CHECKING:
+    from .network import Network
 
 
-def indexes(y: npy.ndarray, thres: float = 0.3, min_dist: int = 1) -> npy.ndarray:
+def indexes(y: np.ndarray, thres: float = 0.3, min_dist: int = 1) -> np.ndarray:
     """
     Peak detection routine.
 
@@ -79,44 +91,44 @@ def indexes(y: npy.ndarray, thres: float = 0.3, min_dist: int = 1) -> npy.ndarra
     #OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
     #THE SOFTWARE.
 
-    if isinstance(y, npy.ndarray) and npy.issubdtype(y.dtype, npy.unsignedinteger):
+    if isinstance(y, np.ndarray) and np.issubdtype(y.dtype, np.unsignedinteger):
         raise ValueError("y must be signed")
 
-    thres = thres * (npy.max(y) - npy.min(y)) + npy.min(y)
+    thres = thres * (np.max(y) - np.min(y)) + np.min(y)
     min_dist = int(min_dist)
 
     # compute first order difference
-    dy = npy.diff(y)
+    dy = np.diff(y)
 
     # propagate left and right values successively to fill all plateau pixels (0-value)
-    zeros, = npy.where(dy == 0)
+    zeros, = np.where(dy == 0)
 
     # check if the singal is totally flat
     if len(zeros) == len(y) - 1:
-        return npy.array([])
+        return np.array([])
 
     while len(zeros):
         # add pixels 2 by 2 to propagate left and right value onto the zero-value pixel
-        zerosr = npy.hstack([dy[1:], 0.])
-        zerosl = npy.hstack([0., dy[:-1]])
+        zerosr = np.hstack([dy[1:], 0.])
+        zerosl = np.hstack([0., dy[:-1]])
 
         # replace 0 with right value if non zero
         dy[zeros]=zerosr[zeros]
-        zeros, = npy.where(dy == 0)
+        zeros, = np.where(dy == 0)
 
         # replace 0 with left value if non zero
         dy[zeros] = zerosl[zeros]
-        zeros, = npy.where(dy == 0)
+        zeros, = np.where(dy == 0)
 
     # find the peaks by using the first order difference
-    peaks = npy.where((npy.hstack([dy, 0.]) < 0.)
-                     & (npy.hstack([0., dy]) > 0.)
+    peaks = np.where((np.hstack([dy, 0.]) < 0.)
+                     & (np.hstack([0., dy]) > 0.)
                      & (y > thres))[0]
 
     # handle multiple peaks, respecting the minimum distance
     if peaks.size > 1 and min_dist > 1:
-        highest = peaks[npy.argsort(y[peaks])][::-1]
-        rem = npy.ones(y.size, dtype=bool)
+        highest = peaks[np.argsort(y[peaks])][::-1]
+        rem = np.ones(y.size, dtype=bool)
         rem[peaks] = False
 
         for peak in highest:
@@ -125,18 +137,18 @@ def indexes(y: npy.ndarray, thres: float = 0.3, min_dist: int = 1) -> npy.ndarra
                 rem[sl] = True
                 rem[peak] = False
 
-        peaks = npy.arange(y.size)[~rem]
+        peaks = np.arange(y.size)[~rem]
 
     return peaks
 
 
-def find_n_peaks(x: npy.ndarray, n: int, thres: float = 0.9, **kwargs) -> List[int]:
+def find_n_peaks(x: np.ndarray, n: int, thres: float = 0.9, **kwargs) -> list[int]:
     """
     Find a given number of peaks in a signal.
 
     Parameters
     ----------
-    x : npy.ndarray
+    x : np.ndarray
         signal
     n : int
         number of peaks to search for
@@ -154,7 +166,7 @@ def find_n_peaks(x: npy.ndarray, n: int, thres: float = 0.9, **kwargs) -> List[i
     ValueError
         If no peaks are found.
     """
-    for dummy in range(10):
+    for _dummy in range(10):
 
         idx = indexes(x, **kwargs)
         if len(idx) < n:
@@ -167,8 +179,16 @@ def find_n_peaks(x: npy.ndarray, n: int, thres: float = 0.9, **kwargs) -> List[i
             return peak_idxs
     raise ValueError('Couldnt find %i peaks' % n)
 
+time_lookup_dict = {
+    "s": 1,
+    "ms": 1e-3,
+    "us": 1e-6,
+    "µs": 1e-6,
+    "ns": 1e-9,
+    "ps": 1e-12
+}
 
-def detect_span(ntwk) -> float:
+def detect_span(ntwk: Network, t_unit: str = "") -> float:
     """
     Detect the correct time-span between two largest peaks.
 
@@ -177,31 +197,74 @@ def detect_span(ntwk) -> float:
     ntwk : :class:`~skrf.network.Network`
         network to get data from
 
+    t_unit : str
+        Time unit for start, stop, center and span arguments, defaults to seconds (s).
+
+        Possible values:
+            * 's': seconds
+            * 'ms': milliseconds
+            * 'µs' or 'us': microseconds
+            * 'ns': nanoseconds (default)
+            * 'ps': picoseconds
+
+
     Returns
     -------
-    span : float
+    span : float in unit t_unit
     """
+
+    if t_unit == "":
+        # Do not raise in autogate mode, where all parameters are None
+        warnings.warn('''
+                        Time unit not passed: uses 's' per default.
+                        ''',
+                        DeprecationWarning, stacklevel=2)
+        t_unit = 's'
+
     x = ntwk.s_time_db.flatten()
     p1, p2 = find_n_peaks(x, n=2)
     # distance to nearest neighbor peak
-    span = abs(ntwk.frequency.t_ns[p1]-ntwk.frequency.t_ns[p2])
-    return span
+    span = abs(ntwk.frequency.t[p1]-ntwk.frequency.t[p2])
 
+    return span / time_lookup_dict[t_unit]
 
-def time_gate(ntwk, start: float = None, stop: float = None, center: float = None, span: float = None,
-              mode: str = 'bandpass', window=('kaiser', 6), media=None,
-              boundary: str = 'reflect', return_all: bool = False):
+def get_window(window: str | tuple | Callable, Nx: int, **kwargs) -> np.ndarray:
+    """Calls a custom window function or `scipy.signal.get_window()` depending on the window argument.
+
+    Parameters
+    ----------
+    window : str, tuple or Callable
+        The callable window function or a valid window string
+        for `scipy.signal.get_window()`.
+    Nx : int
+        Number of samples
+
+    Returns
+    -------
+    window : np.ndarray
+        Window samples.
     """
-    Time-gate one-port s-parameters.
 
-    The gate can be defined with start/stop times, or by
-    center/span. all times are in units of nanoseconds. common
-    windows are:
+    if callable(window):
+        return window(Nx, **kwargs)
+    else:
+        return signal.get_window(window, Nx=Nx, **kwargs)
+
+def time_gate(ntwk: Network, start: float = None, stop: float = None, center: float = None, span: float = None,
+              mode: str = 'bandpass', window=('kaiser', 6),
+              method: str ='fft', fft_window: str='cosine', conv_mode: str='wrap', t_unit: str = "") -> Network:
+    """
+    Time-domain gating of one-port s-parameters with a window function from scipy.signal.windows.
+
+    The gate can be defined with start/stop times, or by center/span. All times are in units of seconds but
+    can be changed using the `t_unit` parameter.
+    Common windows are:
 
     * ('kaiser', 6)
     * 6 # integers are interpreted as kaiser beta-values
     * 'hamming'
     * 'boxcar'  # a straight up rect
+    * Callable function which accepts integer with window size as argument
 
     If no parameters are passed this will try to auto-gate the largest
     peak.
@@ -211,32 +274,65 @@ def time_gate(ntwk, start: float = None, stop: float = None, center: float = Non
     ntwk : :class:`~skrf.network.Network`
         network to operate on
     start : number, or None
-        start of time gate, (ns).
+        start of time gate in t_unit.
     stop : number, or None
-        stop of time gate (ns).
+        stop of time gate in t_unit.
     center : number, or None
-        center of time gate, (ns). If None, and span is given,
+        center of time gate, in t_unit. If None, and span is given,
         the gate will be centered on the peak.
     span : number, or None
-        span of time gate, (ns).  If None span will be half of the
+        span of time gate, in t_unit.  If None span will be half of the
         distance to the second tallest peak
-    mode: ['bandpass','bandstop']
+    mode : ['bandpass', 'bandstop']
         mode of gate
-    boundary:  {'reflect', 'constant', 'nearest', 'mirror', 'wrap'},
-        passed to `scipy.ndimage.filters.convolve1d`
     window : string, float, or tuple
-        passed to `window` arg of `scipy.signal.get_window`
+        passed to `window` arg of `scipy.signal.get_window()` or callable function
+    method : str
+        Gating method. There are 3 option: 'convolution', 'fft', 'rfft'.
+
+        With *'convolution'*, the time-domain gate gets transformed into frequency-domain using inverse FFT and the
+        gating is then achieved by convolution with the frequency-domain data.
+
+        With *'fft'* (default), the data gets transformed into time-domain using inverse FFT and the gating is achieved
+        by multiplication with the time-domain gate. The gated time-domain signal is then transformed back into
+        frequency-domain using FFT. As only positive signal frequencies are considered for the inverse FFT
+        (with or without a dc component), the resulting time-domain signal has the same number of samples as in the
+        frequency-domain, but is complex-valued. This method is also know as *time-domain band-pass mode*.
+
+        With *'rfft'*, the procedure is the same as with *'fft'*, but the inverse FFT uses a complex-conjugate copy of
+        the positive signal frequencies for the negative frequencies (Hermitian frequency response). A dc sample is
+        also required. The resulting time-domain signal is real-valued and has twice the number of samples, which gives
+        an improved time resolution. This method is also known as *time-domain low-pass mode*.
+
+    fft_window : str or tuple or None
+        Frequency-domain window applied before the inverse FFT in case of the (R)FFT method.
+        This parameter takes the same values as the `window` parameter.
+        Example: `window='hann` (default), or `window=('kaiser', 5)`, or `window=None`.
+        The window helps to remove artefacts such as time-domain sidelobes of the pulses, but it is a trade-off with
+        the achievable pulse width. The window is removed when the gated time-domain signals is transformed back into
+        frequency-domain.
+
+    conv_mode : str
+        Extension mode for the convolution (if selected) determining how the frequency-domain gate is extended beyond
+        the boundaries. This has a large effect on the generation of gating artefacts due to boundary effects. The
+        optimal mode depends on the data. See the parameter description of `scipy.ndimage.convolve1d` for the available
+        options.
+
+    t_unit : str
+        Time unit for start, stop, center and span arguments, defaults to seconds (s).
+
+        Possible values:
+            * 's': seconds (default)
+            * 'ms': milliseconds
+            * 'µs' or 'us': microseconds
+            * 'ns': nanoseconds
+            * 'ps': picoseconds
+
 
     Note
     ----
-    You cant gate things that are 'behind' strong reflections. This
+    You can't gate things that are 'behind' strong reflections. This
     is due to the multiple reflections that occur.
-
-    If `center!=0`, then the ntwk's time response is shifted
-    to t=0, gated, then shifted back to where it was. This is
-    done in frequency domain using `ntwk.delay()`. If the media being
-    gated is dispersive (ie waveguide), then the gate `span` will be
-    span at t=0, which is different.
 
     If you need to time-gate an N-port network, then you should
     gate each s-parameter independently.
@@ -246,88 +342,127 @@ def time_gate(ntwk, start: float = None, stop: float = None, center: float = Non
     ntwk : Network
         copy of ntwk with time-gated s-parameters
 
-
     .. warning::
         Depending on sharpness of the gate, the band edges may be
         inaccurate, due to properties of FFT. We do not re-normalize
         anything.
-
-
     """
+
     if ntwk.nports >1:
-        raise ValueError('Time-gating only works on one-ports. try taking ntwk.s11 or ntwk.s21 first')
+        raise ValueError('Time-gating only works on one-ports. Try passing `ntwk.s11` or `ntwk.s21`.')
+
+    if t_unit == "":
+        if not all([e is None for e in [start, stop, center, span]]):
+            # Do not raise in autogate mode, where all parameters are None
+            warnings.warn('''
+                            Time unit not passed: uses 's' per default.
+                            ''',
+                            DeprecationWarning, stacklevel=2)
+        t_unit = 's'
+
+    t_mult = time_lookup_dict[t_unit]
 
     if start is not None and stop is not None:
-        start *= 1e-9
-        stop *= 1e-9
+        start *= t_mult
+        stop *= t_mult
         span = abs(stop-start)
         center = (stop+start)/2.
 
     else:
         if center is None:
-            # they didnt provide center, so find the peak
+            # they didn't provide center, so find the peak
             n = ntwk.s_time_mag.argmax()
             center = ntwk.frequency.t_ns[n]
 
         if span is None:
-            span = detect_span(ntwk)
+            span = detect_span(ntwk, t_unit='ns')
 
-        center *= 1e-9
-        span *= 1e-9
+        center *= t_mult
+        span *= t_mult
         start = center - span / 2.
         stop = center + span / 2.
 
+    ntwk_gated = ntwk.copy()
+    method = method.lower()
+    n_fd = ntwk.frequency.npoints
+    df = ntwk.frequency.step
 
+    if method == 'convolution':
+        # frequency-domain gating
+        n_td = n_fd
+        # create dummy-window
+        window_fd = np.ones(n_fd)
+
+    elif method == 'fft':
+        # time-domain band-pass mode
+        n_td = n_fd
+        if fft_window is not None:
+            # create band-pass window (zero on both lower and upper limit, one at center)
+            window_fd = get_window(fft_window, n_fd)
+        else:
+            # create dummy-window
+            window_fd = np.ones(n_fd)
+
+    elif method == 'rfft':
+        # time-domain low-pass mode
+        if ntwk.f[0] > 0.0:
+            # no dc point included
+            warnings.warn('The network data to be gated does not contain the dc point (0 Hz). This is required for the '
+                          'selected low-pass gating mode. Please consider to include the dc point if the results are '
+                          'inaccurate, either by direct measurement of by extrapolation using '
+                          'skrf.Network.extrapolate_to_dc().', UserWarning, stacklevel=2)
+        n_td = 2 * n_fd - 1
+        if fft_window is not None:
+            # create low-pass window (one at lower limit at f=0, zero on upper limit)
+            window_fd = get_window(fft_window, 2 * n_fd)
+            window_fd = window_fd[n_fd:]
+        else:
+            # create dummy-window
+            window_fd = np.ones(n_fd)
+
+    else:
+        raise ValueError(f'Invalid parameter method=`{method}`')
+
+    # apply frequency-domain window
+    ntwk_gated.s[:, 0, 0] = ntwk_gated.s[:, 0, 0] * window_fd
+
+    # create time vector
+    t = np.fft.fftshift(np.fft.fftfreq(n_td, df))
     # find start/stop gate indices
-    t = ntwk.frequency.t
     start_idx = find_nearest_index(t, start)
     stop_idx = find_nearest_index(t, stop)
 
-    # create window
-    window_width = abs(stop_idx - start_idx)
-    window = signal.get_window(window, window_width)
+    # create gating window
+    window_width = abs(stop_idx - start_idx) + 1
+    window = get_window(window, window_width)
 
     # create the gate by padding the window with zeros
-    gate = npy.r_[npy.zeros(start_idx),
-                           window,
-                           npy.zeros(len(t) - stop_idx)]
+    gate = np.zeros_like(t)
+    gate[start_idx:stop_idx+1] = window
 
-    #FFT the gate, so we have it's frequency response, aka kernel
-    kernel=fft.ifftshift(fft.fft(fft.fftshift(gate, axes=0), axis=0))
-    kernel =abs(kernel).flatten() # take mag and flatten
-    kernel=kernel/sum(kernel) # normalize kernel
+    if method == 'convolution':
+        # frequency-domain gating
+        kernel = fftshift(fft(ifftshift(gate), norm='forward'))
+        ntwk_gated.s[:, 0, 0] = convolve1d(ntwk_gated.s[:, 0, 0], kernel, mode=conv_mode)
+    elif method == 'fft':
+        # time-domain band-pass mode
+        s_td = fftshift(ifft(ntwk_gated.s[:, 0, 0]))
+        s_td_g = s_td * gate
+        ntwk_gated.s[:, 0, 0] = fft(ifftshift(s_td_g))
+    elif method == 'rfft':
+        # time-domain low-pass mode
+        s_td = fftshift(irfft(ntwk_gated.s[:, 0, 0], n=len(t)))
+        s_td_g = s_td * gate
+        ntwk_gated.s[:, 0, 0] = rfft(ifftshift(s_td_g))
 
-    out = ntwk.copy()
-
-    # conditionally delay ntwk, to center at t=0, this is
-    # equivalent to gating at center.  (this is probably very inefficient)
-    if center!=0:
-        out = out.delay(-center*1e9, 'ns',port=0,media=media)
-
-    # waste of code to handle convolve1d suck
-    re = out.s_re[:,0,0]
-    im = out.s_im[:,0,0]
-    s = convolve1d(re,kernel, mode=boundary)+\
-     1j*convolve1d(im,kernel, mode=boundary)
-    out.s[:,0,0] = s
-    # conditionally  un-delay ntwk
-    if center!=0:
-        out = out.delay(center*1e9, 'ns',port=0,media=media)
+    # remove frequency-domain window
+    ntwk_gated.s[:, 0, 0] = ntwk_gated.s[:, 0, 0] / window_fd
 
     if mode == 'bandstop':
-        out = ntwk-out
-    elif mode=='bandpass':
+        ntwk_gated = ntwk - ntwk_gated
+    elif mode == 'bandpass':
         pass
     else:
         raise ValueError('mode should be \'bandpass\' or \'bandstop\'')
 
-    if return_all:
-        # compute the gate ntwk and add delay
-        gate_ntwk = out.s11.copy()
-        gate_ntwk.s = kernel
-        gate_ntwk= gate_ntwk.delay(center*1e9, 'ns', media=media)
-
-        return {'gated_ntwk':out,
-                'gate':gate_ntwk}
-    else:
-        return out
+    return ntwk_gated

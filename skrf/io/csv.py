@@ -1,4 +1,3 @@
-
 """
 .. module:: skrf.io.csv
 
@@ -48,18 +47,27 @@ Reading/Writing Anritsu VectorStar
 
 
 """
-import numpy as npy
+from __future__ import annotations
+
 import os
-from ..network import Network
-from .. import mathFunctions as mf
-from ..frequency import Frequency
-from .. import util
+from logging import getLogger
 from warnings import warn
+
+import numpy as np
+
+from .. import mathFunctions as mf
+from .. import util
+from ..constants import FREQ_UNITS, FrequencyUnitT
+from ..frequency import Frequency
+from ..network import Network
+
+logger = getLogger(__name__)
+
 
 # delayed imports
 # from pandas import Series, Index, DataFrame
 
-def read_pna_csv(filename, *args, **kwargs):
+def read_pna_csv(filename, *args, **kwargs) -> tuple[str, str, np.ndarray]:
     r"""
     Reads data from a csv file written by an Agilient PNA.
 
@@ -91,8 +99,8 @@ def read_pna_csv(filename, *args, **kwargs):
     --------
     >>> header, comments, data = rf.read_pna_csv('myfile.csv')
     """
-    warn("deprecated", DeprecationWarning)
-    with open(filename,'r') as fid:
+    warn("deprecated", DeprecationWarning, stacklevel=2)
+    with open(filename) as fid:
         begin_line = -2
         end_line = -1
         n_END = 0
@@ -113,25 +121,36 @@ def read_pna_csv(filename, *args, **kwargs):
         footer = k - end_line
 
     try:
-        data = npy.genfromtxt(
+        data = np.genfromtxt(
             filename,
             delimiter = ',',
             skip_header = begin_line + 2,
             skip_footer = footer - (n_END-1)*2,
-            *args, **kwargs
+            **kwargs
             )
     except(ValueError):
-        # carrage returns require a doubling of skiplines
-        data = npy.genfromtxt(
+        # carriage returns require a doubling of skiplines
+        data = np.genfromtxt(
             filename,
             delimiter = ',',
             skip_header = (begin_line + 2)*2,
             skip_footer = footer,
-            *args, **kwargs
+            **kwargs
             )
 
     # pna uses unicode coding for degree symbol, but we dont need that
     header = header.replace('\xb0','deg').rstrip('\n').rstrip('\r')
+
+    units_dict: dict[str, FrequencyUnitT] = {k.lower(): k for k in FREQ_UNITS.keys()}
+
+    # Get the frequency unit from the header and convert to Hz
+    unit_raw = header.split(',')[0].strip('Freq')[1:-1]
+    try:
+        unit_tmp = unit_raw.lower()
+        if unit_tmp in units_dict:
+            data[:, 0] *= FREQ_UNITS[units_dict[unit_tmp]]
+    except Exception as exc:
+        raise ValueError(f"Could not parse frequency unit '{unit_raw}'") from exc
 
     return header, comments, data
 
@@ -149,41 +168,40 @@ def pna_csv_2_df(filename):
     df : `pandas.DataFrame`
 
     """
-    warn("deprecated", DeprecationWarning)
-    from pandas import Series, Index, DataFrame
+    warn("deprecated", DeprecationWarning, stacklevel=2)
+    from pandas import DataFrame, Index
     header, comments, d = read_pna_csv(filename)
-    f_unit = header.split(',')[0].split(')')[0].split('(')[1]
 
     names = header.split(',')
 
     index = Index(d[:,0], name = names[0])
-    df=DataFrame(dict([(names[k], d[:,k]) for k in range(1,len(names))]), index=index)
+    df=DataFrame({names[k]: d[:,k] for k in range(1,len(names))}, index=index)
     return df
 
 def pna_csv_2_ntwks2(filename, *args, **kwargs):
-    warn("deprecated", DeprecationWarning)
+    warn("deprecated", DeprecationWarning, stacklevel=2)
     df = pna_csv_2_df(filename, *args, **kwargs)
     header, comments, d = read_pna_csv(filename)
     ntwk_dict  = {}
     param_set=set([k[:3] for k in df.columns])
-    f = df.index.values*1e-9
+    f = df.index.values
     for param in param_set:
         try:
             s = mf.dbdeg_2_reim(
-                df['%s Log Mag(dB)'%param].values,
-                df['%s Phase(deg)'%param].values,
+                df[f'{param} Log Mag(dB)'].values,
+                df[f'{param} Phase(deg)'].values,
                 )
         except(KeyError):
             s = mf.dbdeg_2_reim(
-                df['%s (REAL)'%param].values,
-                df['%s (IMAG)'%param].values,
+                df[f'{param} (REAL)'].values,
+                df[f'{param} (IMAG)'].values,
                 )
 
-        ntwk_dict[param] = Network(f=f, s=s, name=param, comments=comments)
+        ntwk_dict[param] = Network(f=f, s=s, name=param, comments=comments, f_unit='Hz')
 
 
     try:
-        s=npy.zeros((len(f),2,2), dtype=complex)
+        s=np.zeros((len(f),2,2), dtype=complex)
         s[:,0,0] = ntwk_dict['S11'].s.flatten()
         s[:,1,1] = ntwk_dict['S22'].s.flatten()
         s[:,1,0] = ntwk_dict['S21'].s.flatten()
@@ -192,7 +210,7 @@ def pna_csv_2_ntwks2(filename, *args, **kwargs):
         ntwk = Network(f=f, s=s, name=name, comments=comments)
 
         return ntwk
-    except:
+    except  Exception:
         return ntwk_dict
 
 def pna_csv_2_ntwks3(filename):
@@ -215,16 +233,16 @@ def pna_csv_2_ntwks3(filename):
     col_headers = pna_csv_header_split(filename)
 
     # set impedance to 50 Ohm (doesn't matter for now)
-    z0 = npy.ones((npy.shape(d)[0]))*50
-    # read f values, convert to GHz
-    f = d[:,0]/1e9
+    z0 = np.ones(np.shape(d)[0])*50
+    # read f values
+    f = d[:,0]
 
     name = os.path.splitext(os.path.basename(filename))[0]
 
     if 'db' in header.lower() and 'deg' in header.lower():
         # this is a cvs in DB/DEG format
         # -> convert db/deg values to real/imag values
-        s = npy.zeros((len(f),2,2), dtype=complex)
+        s = np.zeros((len(f),2,2), dtype=complex)
 
         for k, h in enumerate(col_headers[1:]):
             if 's11' in h.lower() and 'db' in h.lower():
@@ -236,11 +254,11 @@ def pna_csv_2_ntwks3(filename):
             elif 's22' in h.lower() and 'db' in h.lower():
                 s[:,1,1] = mf.dbdeg_2_reim(d[:,k+1], d[:,k+2])
 
-        n = Network(f=f,s=s,z0=z0, name = name)
+        n = Network(f=f,s=s,z0=z0, name = name, f_unit="Hz")
         return n
 
     else:
-        warn("File does not seem to be formatted properly (only dB/deg supported for now)")
+        warn("File does not seem to be formatted properly (only dB/deg supported for now)", stacklevel=2)
 
 def read_all_csv(dir='.', contains = None):
     """
@@ -270,19 +288,19 @@ def read_all_csv(dir='.', contains = None):
         try:
             out[keyname] = pna_csv_2_ntwks3(fullname)
             continue
-        except:
+        except Exception:
             pass
 
         try:
             out[keyname] = Network(fullname)
             continue
-        except:
+        except  Exception:
             pass
 
     return out
 
 
-class AgilentCSV(object):
+class AgilentCSV:
     """
     Agilent-style csv file representing either scalar traces vs frequency
     or complex data vs. frequency.
@@ -321,7 +339,7 @@ class AgilentCSV(object):
             An array containing the data. The meaning of which depends on
             the header.
         """
-        with open(self.filename, 'r') as fid:
+        with open(self.filename) as fid:
             begin_line = -2
             end_line = -1
             comments = ''
@@ -339,15 +357,15 @@ class AgilentCSV(object):
             footer = k - end_line
 
         try:
-            data = npy.genfromtxt(
+            data = np.genfromtxt(
                 self.filename,
                 delimiter = ',',
                 skip_header = begin_line + 2,
                 skip_footer = footer,
                 )
         except(ValueError):
-            # carrage returns require a doubling of skiplines
-            data = npy.genfromtxt(
+            # carriage returns require a doubling of skiplines
+            data = np.genfromtxt(
                 self.filename,
                 delimiter = ',',
                 skip_header = (begin_line + 2)*2,
@@ -364,12 +382,12 @@ class AgilentCSV(object):
         """
         Frequency object : :class:`~skrf.frequency.Frequency`.
         """
-        header, comments, d = self.header, self.comments, self.data
+        d = self.data
         #try to pull out frequency unit
         cols = self.columns
         try:
             f_unit = cols[0].split('(')[1].split(')')[0]
-        except:
+        except  Exception:
             f_unit = 'hz'
 
         f = d[:,0]
@@ -392,12 +410,12 @@ class AgilentCSV(object):
 
         If splitting the header fails, then a suitable list is returned of
         the correct length, which looks like::
-            
+
             ['Freq(?)','filename-0','filename-1',..]
         """
         header,  d = self.header, self.data
 
-        n_traces =  d.shape[1] - 1 # because theres is one frequency column
+        n_traces =  d.shape[1] - 1 # because there's is one frequency column
 
         if header.count(',') == n_traces:
             cols = header.split(',') # column names
@@ -411,7 +429,7 @@ class AgilentCSV(object):
                 cols =  [col + ')'  for col in cols[:-1]] + [cols[-1]]
             else:
                 # I dont know how to separate column names
-                warn('Cant decipher header, so I\'m creating one. check output. ')
+                warn('Cant decipher header, so I\'m creating one. check output. ', stacklevel=2)
                 cols = ['Freq(?),']+['%s-%i'%(util.basename_noext(self.filename),k) \
                     for k in range(n_traces)]
         return cols
@@ -434,8 +452,9 @@ class AgilentCSV(object):
             list of Networks representing the data contained in each column
 
         """
-        header, comments, d = self.header, self.comments, self.data
-        n_traces =  d.shape[1] - 1 # because theres is one frequency column
+        comments = self.comments
+        d = self.data
+        n_traces =  d.shape[1] - 1 # because there's is one frequency column
         cols = self.columns
         freq = self.frequency
 
@@ -449,7 +468,7 @@ class AgilentCSV(object):
             ntwk_list.append(
                 Network(
                     frequency = freq, s = s,comments = comments,
-                    name = cols[k],*self.args, **self.kwargs)
+                    name = cols[k], **self.kwargs)
                 )
 
         return ntwk_list
@@ -458,8 +477,8 @@ class AgilentCSV(object):
     def networks(self):
         """
         Reads a PNAX csv file, and returns a list of one-port Networks.
-        
-        
+
+
         .. note::
             Note this only works if csv is save in Real/Imaginary format for now
 
@@ -476,11 +495,12 @@ class AgilentCSV(object):
 
         """
         names = self.columns
-        header, comments, d= self.header,self.comments, self.data
+        comments = self.comments
+        d = self.data
 
         ntwk_list = []
         if (self.n_traces)//2 == 0 : # / --> // for Python3 compatibility
-            # this isnt complex data
+            # this isn't complex data
             return self.scalar_networks
         else:
             for k in range((self.n_traces)//2):
@@ -492,12 +512,13 @@ class AgilentCSV(object):
                 elif 'real' in names[k].lower() and 'imag' in names[k+1].lower():
                     s = d[:,k*2+1]+1j*d[:,k*2+2]
                 else:
-                    warn('CSV format unrecognized in "%s" or "%s". It\'s up to you to interpret the resultant network correctly.' % (names[k], names[k+1]))
+                    warn(f'CSV format unrecognized in "{names[k]}" or "{names[k+1]}". '
+                         'It\'s up to you to interpret the resulting network correctly.', stacklevel=2)
                     s = d[:,k*2+1]+1j*d[:,k*2+2]
 
                 ntwk_list.append(
                     Network(frequency = self.frequency, s=s, name=name,
-                        comments=comments, *self.args, **self.kwargs)
+                        comments=comments, **self.kwargs)
                     )
 
         return ntwk_list
@@ -505,8 +526,8 @@ class AgilentCSV(object):
     @property
     def dict(self):
         """
-        Dictionnary representation of csv file.
-        
+        Dictionary representation of csv file.
+
         Returns
         -------
         dict : dict
@@ -525,11 +546,11 @@ class AgilentCSV(object):
         df : `pandas.DataFrame`
 
         """
-        from pandas import  Index, DataFrame
+        from pandas import DataFrame, Index
 
         index = Index(
             self.frequency.f_scaled,
-            name = 'Frequency(%s)'%self.frequency.unit)
+            name = f'Frequency({self.frequency.unit})')
 
         return DataFrame(
                 { self.columns[k]:self.data[:,k] \
@@ -558,7 +579,7 @@ def pna_csv_header_split(filename):
     cols : list of str's
         list of column names
     """
-    warn("deprecated", DeprecationWarning)
+    warn("deprecated", DeprecationWarning, stacklevel=2)
     header, comments, d = read_pna_csv(filename)
 
     n_traces =  d.shape[1] - 1 # because theres is one frequency column
@@ -575,7 +596,7 @@ def pna_csv_header_split(filename):
             cols =  [col + ')'  for col in cols[:-1]] + [cols[-1]]
         else:
             # i dont know how to separate column names
-            warn('Cant decipher header, so im creating one. check output. ')
+            warn('Cant decipher header, so im creating one. check output. ', stacklevel=2)
             cols = ['Freq(?),']+['%s-%i'%(util.basename_noext(filename),k) \
                 for k in range(n_traces)]
     return cols
@@ -589,7 +610,7 @@ def pna_csv_2_ntwks(filename):
         Use :func:`pna_csv_2_ntwks3` instead.
 
 
-    .. note::    
+    .. note::
         Note this only works if csv is save in Real/Imaginary format for now
 
 
@@ -604,7 +625,7 @@ def pna_csv_2_ntwks(filename):
         list of Networks representing the data contained in column pairs
 
     """
-    warn("deprecated", DeprecationWarning)
+    warn("deprecated", DeprecationWarning, stacklevel=2)
     #TODO: check the data's format (Real-imag or db/angle , ..)
     header, comments, d = read_pna_csv(filename)
     #import pdb;pdb.set_trace()
@@ -615,45 +636,38 @@ def pna_csv_2_ntwks(filename):
 
 
     if (d.shape[1]-1)/2 == 0 :
-        # this isnt complex data
-        f = d[:,0]*1e-9
+        # this isn't complex data
+        f = d[:,0]
         if 'db' in header.lower():
             s = mf.db_2_mag(d[:,1])
         else:
             raise (NotImplementedError)
         name = os.path.splitext(os.path.basename(filename))[0]
-        return Network(f=f, s=s, name=name, comments=comments)
+        return Network(f=f, s=s, name=name, comments=comments, f_unit='Hz')
     else:
         for k in range(int((d.shape[1]-1)/2)):
-            f = d[:,0]*1e-9
+            f = d[:,0]
             name = names[k]
-            print((names[k], names[k+1]))
             if 'db' in names[k].lower() and 'deg' in names[k+1].lower():
                 s = mf.dbdeg_2_reim(d[:,k*2+1], d[:,k*2+2])
             elif 'real' in names[k].lower() and 'imag' in names[k+1].lower():
                 s = d[:,k*2+1]+1j*d[:,k*2+2]
             else:
-                print('WARNING: csv format unrecognized. ts up to you to  interpret the resultant network correctly.')
+                logger.warning("csv format unrecognized. It's up to you to interpret the resultant network correctly.")
                 s = d[:,k*2+1]+1j*d[:,k*2+2]
 
             ntwk_list.append(
-                Network(f=f, s=s, name=name, comments=comments)
+                Network(f=f, s=s, name=name, comments=comments, f_unit='Hz')
                 )
 
     return ntwk_list
 
 def pna_csv_2_freq(filename):
-    warn("deprecated", DeprecationWarning)
+    warn("deprecated", DeprecationWarning, stacklevel=2)
     header, comments, d = read_pna_csv(filename)
-    #try to pull out frequency unit
-    cols = pna_csv_header_split(filename)
-    try:
-        f_unit = cols[0].split('(')[1].split(')')[0]
-    except:
-        f_unit = 'hz'
 
     f = d[:,0]
-    return Frequency.from_f(f, unit = f_unit)
+    return Frequency.from_f(f, unit = "Hz")
 
 
 def pna_csv_2_scalar_ntwks(filename, *args, **kwargs):
@@ -673,22 +687,15 @@ def pna_csv_2_scalar_ntwks(filename, *args, **kwargs):
         list of Networks representing the data contained in column pairs
 
     """
-    warn("deprecated", DeprecationWarning)
+    warn("deprecated", DeprecationWarning, stacklevel=2)
     header, comments, d = read_pna_csv(filename)
 
     n_traces =  d.shape[1] - 1 # because theres is one frequency column
 
     cols = pna_csv_header_split(filename)
 
-
-    #try to pull out frequency unit
-    try:
-        f_unit = cols[0].split('(')[1].split(')')[0]
-    except:
-        f_unit = 'hz'
-
     f = d[:,0]
-    freq = Frequency.from_f(f, unit = f_unit)
+    freq = Frequency.from_f(f, unit = 'Hz')
 
     # loop through columns and create a single network for each column
     ntwk_list = []
@@ -700,7 +707,7 @@ def pna_csv_2_scalar_ntwks(filename, *args, **kwargs):
         ntwk_list.append(
             Network(
                 frequency = freq, s = s,comments = comments,
-                name = cols[k],*args, **kwargs)
+                name = cols[k], **kwargs)
             )
 
 
@@ -733,7 +740,7 @@ def read_zva_dat(filename, *args, **kwargs):
 
     """
     #warn("deprecated", DeprecationWarning)
-    with open(filename,'r') as fid:
+    with open(filename) as fid:
         begin_line = -2
         comments = ''
         for k,line in enumerate(fid.readlines()):
@@ -742,11 +749,11 @@ def read_zva_dat(filename, *args, **kwargs):
                 header = line
                 begin_line = k+1
 
-    data = npy.genfromtxt(
+    data = np.genfromtxt(
         filename,
         delimiter = ',',
         skip_header = begin_line,
-        *args, **kwargs
+        **kwargs
         )
 
     return header, comments, data
@@ -771,7 +778,7 @@ def zva_dat_2_ntwks(filename):
     col_headers = header.split(',')
 
     # set impedance to 50 Ohm (doesn't matter for now)
-    z0 = npy.ones((npy.shape(d)[0]))*50
+    z0 = np.ones(np.shape(d)[0])*50
     # read f values, convert to GHz
     f = d[:,0]/1e9
 
@@ -780,7 +787,7 @@ def zva_dat_2_ntwks(filename):
     if 're' in header.lower() and 'im' in header.lower():
         # this is a cvs in re/im format
         # -> no conversion required
-        s = npy.zeros((len(f),2,2), dtype=complex)
+        s = np.zeros((len(f),2,2), dtype=complex)
 
         for k, h in enumerate(col_headers):
             if 's11' in h.lower() and 're' in h.lower():
@@ -792,10 +799,10 @@ def zva_dat_2_ntwks(filename):
             elif 's22' in h.lower() and 're' in h.lower():
                 s[:,1,1] = d[:,k+1] #+ 1j*d[:,k+2]
 
-    elif 'db' in header.lower() and not 'deg' in header.lower():
+    elif 'db' in header.lower() and "deg" not in header.lower():
         # this is a cvs in db format (no deg values)
         # -> conversion required
-        s = npy.zeros((len(f),2,2), dtype=complex)
+        s = np.zeros((len(f),2,2), dtype=complex)
 
         for k, h in enumerate(col_headers):
             # this doesn't always work! (depends on no. of channels, sequence of adding traces etc.
@@ -809,7 +816,7 @@ def zva_dat_2_ntwks(filename):
         return n
 
     else:
-        warn("File does not seem to be formatted properly (dB/deg or re/im)")
+        warn("File does not seem to be formatted properly (dB/deg or re/im)", stacklevel=2)
 
 def read_all_zva_dat(dir='.', contains = None):
     """
@@ -840,13 +847,13 @@ def read_all_zva_dat(dir='.', contains = None):
         try:
             out[keyname] = zva_dat_2_ntwks(fullname)
             continue
-        except:
+        except  Exception:
             pass
 
         try:
             out[keyname] = Network(fullname)
             continue
-        except:
+        except  Exception:
             pass
 
     return out
@@ -875,12 +882,12 @@ def read_vectorstar_csv(filename, *args, **kwargs):
 
 
     """
-    with open(filename,'r') as fid:
+    with open(filename) as fid:
         comments = ''.join([line for line in fid if line.startswith('!')])
         fid.seek(0)
         header = [line for line in fid if line.startswith('PNT')]
         fid.close()
-        data = npy.genfromtxt(
+        data = np.genfromtxt(
             filename,
             comments='!',
             delimiter =',',
@@ -894,7 +901,7 @@ def vectorstar_csv_2_ntwks(filename):
     """
     Reads a vectorstar csv file, and returns a list of one-port Networks.
 
-    
+
     .. note::
         Note this only works if csv is save in Real/Imaginary format for now
 
@@ -923,5 +930,3 @@ def vectorstar_csv_2_ntwks(filename):
         name = names[k].rstrip(),
         comments = comments,
         ) for k in range(d.shape[1]/3)]
-
-

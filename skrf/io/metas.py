@@ -6,18 +6,18 @@ metas (:mod:`skrf.io.metas`)
 
 Functions for reading and writing file formats defined by METAS
 
-http://www.metas.ch/metas/en/home/fabe/hochfrequenz/vna-tools.html
+https://www.metas.ch/vnatools
 
 .. autosummary::
    :toctree: generated/
 
 
 """
-from numpy import savetxt, array, hstack
+from numpy import array, hstack, savetxt
 
 from ..mathFunctions import complex2Scalar
-from ..networkSet import NetworkSet
 from ..network import average
+from ..networkSet import NetworkSet
 
 
 def ns_2_sdatcv(ns, fname, polar=False):

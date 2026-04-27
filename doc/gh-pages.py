@@ -20,8 +20,7 @@ import shutil
 import sys
 from os import chdir as cd
 from os.path import join as pjoin
-
-from subprocess import Popen, PIPE, CalledProcessError, check_call
+from subprocess import PIPE, CalledProcessError, Popen, check_call
 
 #-----------------------------------------------------------------------------
 # Globals
@@ -70,7 +69,7 @@ def sh3(cmd):
 
 def init_repo(path):
     """clone the gh-pages repo if we haven't already."""
-    sh("git clone %s %s"%(pages_repo, path))
+    sh(f"git clone {pages_repo} {path}")
     here = os.getcwdu()
     cd(path)
     sh('git checkout gh-pages')
@@ -113,21 +112,20 @@ if __name__ == '__main__':
     # directory, and then copy the html tree in there
     shutil.rmtree(dest, ignore_errors=True)
     shutil.copytree(html_dir, dest)
-    if copy_pdf == True:
+    if copy_pdf:
         shutil.copy(pjoin(pdf_dir, pdf_filename), pjoin(dest, pdf_filename))
         pass
 
     try:
         cd(pages_dir)
         status = sh2('git status | head -1')
-        branch = re.match('\# On branch (.*)$', status).group(1)
+        branch = re.match(r'\# On branch (.*)$', status).group(1)
         if branch != 'gh-pages':
-            e = 'On %r, git branch is %r, MUST be "gh-pages"' % (pages_dir,
-                                                                 branch)
+            e = f'On {pages_dir}, git branch is {branch}, MUST be "gh-pages"'
             raise RuntimeError(e)
 
-        sh('git add -A %s' % tag)
-        sh('git commit -m"Updated doc release: %s"' % tag)
+        sh(f'git add -A {tag}')
+        sh(f'git commit -m"Updated doc release: {tag}"')
         print()
         print('Most recent 3 commits:')
         sys.stdout.flush()
@@ -136,5 +134,5 @@ if __name__ == '__main__':
         cd(startdir)
 
     print()
-    print('Now verify the build in: %r' % dest)
+    print(f'Now verify the build in: {dest!r}')
     print("If everything looks good, 'git push'")
