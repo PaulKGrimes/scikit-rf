@@ -184,7 +184,7 @@ from .frequency import Frequency
 from .util import get_fid, get_extn, find_nearest_index, slice_domain
 from .time import time_gate
 
-from .constants import NumberLike, ZERO, K_BOLTZMANN, T0
+from .constants import NumberLike, ZERO, K_BOLTZMANN, T0, H_PLANCK
 from .constants import S_DEFINITIONS, S_DEF_DEFAULT
 
 if TYPE_CHECKING:
@@ -2092,6 +2092,30 @@ class Network(object):
         self.noisew = noise
         self.noise_freq = noise_freq
 
+    def _callon_welton(self, f: float, Ta: float = T0):
+        """
+        Calculate the noise power spectral density using the Callon & Welton "Irreversibility
+        and Generalized Noise" (1951) dissipation fluctuation calculation.
+        
+        This calculation includes the vacuum fluctuation in the electromagnetic field, 
+        and is correct for thermodynamically irrervsible processes at all frequencies 
+        and temperatures. It is particularly important for high frequency devices operating
+        at low temperatures. At low f and high T, it converges on the Rayleigh-Jeans law.
+        
+        Parameters
+        ----------
+        f: float or np.ndarray of floats
+                frequency to calculate the noise power spectral density at.
+        Ta: float
+                thermodynamic temperature of the system
+                
+        Returns
+        -------
+        float or np.ndarray of floats
+                noise power spectral density at f due to a black body at temperature T.
+        """
+        return (H_PLANCK*f) * npy.coth((H_PLANCK*f) / (K_BOLTZMANN*Ta))
+
     def set_passive_noise_w(self, tol: float = mf.ALMOST_ZERO, Ta: float = T0,
                             dtype: str = 'complex'):
         """
@@ -2099,13 +2123,23 @@ class Network(object):
         1) the network is in thermodynamic equilibrium
         2) the network is passive
         3) the network has reflectionless terminations
+        
+        The noise wave correlation matrix C at frequency f for a passive circuit in equilibrium at
+        temperature T is given by:
+        
+        C = P_{C&W}(f, T) * ( I - S.S† )
+        
+        Where P_{C&W} is the noise power spectral density of a blackbody calculated from 
+        the quantum fluctuation-dissipation theorem, as described in Callon & Welton (1951). It includes
+        the zero-point quantum noise in the EM field (unlike Planck's law), and is valid for all f and T.
+        At low f and high T, it converges on the Rayleigh-Jeans law.
 
         Parameters
         ----------
         tol : float
                 tolerance for passivity check
         Ta : float
-                ambient temperature
+                Equilibrium temperature of circuit
         dtype : str
                 type for underlying data structure, change to 'object' for symbolic operation
 
@@ -2113,7 +2147,7 @@ class Network(object):
         if self.is_passive(tol=tol):
             nwcm = npy.zeros(shape=self.s.shape, dtype=dtype)
             for f in range(0, len(self.f)):
-                nwcm[f] = K_BOLTZMANN * Ta * (npy.identity(self.number_of_ports) -
+                nwcm[f] = self._callon_welton(f, Ta) * (npy.identity(self.number_of_ports) -
                                               npy.dot(self.s[f],
                                                       npy.transpose(npy.conjugate(self.s[f]))))
             self.noisew = nwcm

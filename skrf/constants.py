@@ -26,6 +26,10 @@ This module contains constants, numerical approximations, and unit conversions
 .. data:: K_BOLTZMANN
 
     Boltzmann constant (1.38064852e-23)
+    
+.. data:: H_PLANCK
+
+    Planck's constant h (6.62607015e-34 - exact definition in SI)
 
 .. data:: S_DEFINITIONS
 
@@ -77,12 +81,17 @@ Very low but minus infinity value for numerical purposes.
 
 K_BOLTZMANN = 1.38064852e-23
 """
-Boltzmann constant (1.38064852e-23)
+Boltzmann constant, defined in SI as exactly 1.38064852e-23 J/K
 """
 
-T0 = 290.
+H_PLANCK = 6.62607015e-34
 """
-Room temperature (kind of)
+Planck constant, defined in SI as exactly 6.62607015e-34 J.s
+"""
+
+T0 = 293.15
+"""
+NIST defined "Normal Temperature and Pressure" = 68°F/20°C
 """
 
 
